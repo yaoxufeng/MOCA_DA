@@ -155,7 +155,7 @@ class Moca_train(object):
 			print("#", end="")
 		print("\ntesting on target dataset!")
 		
-		for _, (data, target, target_idx) in enumerate(self.target_test_loader):
+		for _, (data, target, target_idx) in tqdm(enumerate(self.target_test_loader)):
 			data, target = data.cuda(), target.cuda()
 			if mode == "train":
 				t_output, target_feature = self.source_model(data, data)
@@ -163,9 +163,10 @@ class Moca_train(object):
 				t_output, target_feature = self.target_model(data, data)
 			if keep_feature:
 				taregt_feature = target_feature.data.cpu()
+				target_idx = target_idx.data.cpu()
 			
-			for idx, feature in zip(target_idx, target_feature):
-				self.queue[idx] = feature
+				for idx, feature in zip(target_idx, target_feature):
+					self.queue[idx.item()] = feature.detach().cpu().numpy()
 			
 			test_loss += F.nll_loss(F.log_softmax(t_output, dim=1), target,
 			                        reduction='sum').item()  # sum up batch loss
@@ -224,11 +225,13 @@ class Moca_train(object):
 				total_loss.backward()
 				optimizer.step()
 			
-			target_feature = target_feature.data.cpu()
-			for idx, feature in zip(target_idx, target_feature):
-				if idx in self.queue.keys():
-					self.queue.pop(idx)  # delete the last idx and its feature
-				self.queue[idx] = feature  # update new idx and its feature
+				target_feature = target_feature.data.cpu()
+				target_idx = target_idx.data.cpu()
+				for idx, feature in zip(target_idx, target_feature):
+					idx = idx.item()
+					if idx in self.queue.keys():
+						self.queue.pop(idx)  # delete the last idx and its feature
+					self.queue[idx] = feature.detach().cpu().numpy()  # update new idx and its feature
 
 			logger.info("train epoch {}".format(i + 1))
 			logger.info("train loss_cls {}".format(loss_cls))
@@ -349,7 +352,7 @@ if __name__ == "__main__":
 	)
 	
 	fine_tuner = Moca_train(model, args=args)
-	fine_tuner.test(keep_feature=False)
+	fine_tuner.test(keep_feature=True)
 	fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path)
 	
 	logger.info("\n++++Source:{} to target {} finish!++++".format(args.source, args.target))
