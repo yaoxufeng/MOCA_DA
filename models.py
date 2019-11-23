@@ -115,9 +115,9 @@ class ResNet(nn.Module):
 		self.cls_fc = nn.Linear(128, num_classes)
 	
 		# ========================= normalize fc ==========================
-		with torch.no_grad():
-			self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
-			self.cls_fc.bias.data.fill_(0.0)
+		# with torch.no_grad():
+		# 	self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
+		# 	self.cls_fc.bias.data.fill_(0.0)
 		# ========================= FBI warning !!! =======================
 		
 	def forward(self, source, target):

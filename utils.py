@@ -289,8 +289,22 @@ def ContrastiveLoss(pred, pred_idx, queue):
 	label = torch.zeros(logits.size(0), dtype=torch.long)  # generate label
 	label[0] = 1.  # the 0th is the true label
 	
-	return F.cross_entropy(32*logits, label)
+	return F.cross_entropy(12*logits, label)
 	
+	
+# =========================  fc unpdate  ==============================
+def model_fc_update(source_model, target_model):
+	'''
+	:param source_model: source_model
+	:param target_model: target_model
+	:return: updated target_model
+	'''
+	source_model.cpu()
+	target_model.cpu()
+	target_model.cls_fc.weight.data = source_model.cls_fc.weight.data
+	
+	return target_model
+
 	
 # =========================  weights unpdate  ==========================
 def model_weights_update(source_model, target_model, m=0.5):

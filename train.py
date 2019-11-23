@@ -233,7 +233,7 @@ class Moca_train(object):
 				source_pred, target_pred, _, target_feature = self.source_model(data_source, data_target)
 				loss_cls = F.nll_loss(F.log_softmax(16*source_pred, dim=1), label_source)
 				# loss_entropy_min = EntropyMinLoss(F.softmax(torch.cat([source_pred, target_pred], dim=0), dim=1))  # entropy minimization loss
-				loss_entropy_min = EntropyMinLoss(F.softmax(32*target_pred, dim=1))
+				loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
 				total_loss = loss_cls + 0.1 * loss_entropy_min
 
 				total_loss.backward()
@@ -257,13 +257,15 @@ class Moca_train(object):
 				if save_name:
 					# torch.save(self.model, save_name)
 					logger.info("Model saved to {}".format(save_name))
-		
+					
+		self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9)
 		# print("self.source_model.metric_fc", self.source_model.metric_feature.weight[0])
 		# logger.info("Finished fine tuning.")
 	
 
 	def finetune_on_target(self, epoches=5, save_name=None):
 		max_correct = 0
+		self.target_model = model_fc_update(self.source_model, self.target_model)
 		self.target_model.cuda()
 		
 		for i in trange(epoches):
@@ -274,7 +276,7 @@ class Moca_train(object):
 				optimizer = torch.optim.SGD([
 					{'params': self.target_model.features.parameters()},
 					{'params': self.target_model.metric_feature.parameters()},
-					{'params': self.target_model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+					# {'params': self.target_model.cls_fc.parameters(), 'lr': LEARNING_RATE},
 				], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
 			
 			for param_group in optimizer.param_groups:
@@ -289,9 +291,10 @@ class Moca_train(object):
 				data_target = data_target.cuda()
 				optimizer.zero_grad()
 				
-				target_pred, target_pred, target_feature, target_feature = self.target_model(data_target, data_target)
+				target_pred, _, target_feature, _ = self.target_model(data_target, data_target)
 				
 				loss_contrastive = ContrastiveLoss(target_feature, target_idx, self.queue)
+				# loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
 				total_loss = loss_contrastive
 				
 				total_loss.backward()
@@ -299,6 +302,7 @@ class Moca_train(object):
 			
 			logger.info("train epoch {}".format(i + 1))
 			logger.info("train loss_contrastive {}".format(loss_contrastive))
+			# logger.info("train loss_entropy_min {}".format(loss_entropy_min))
 			
 			cur_correct = self.test(mode="target")
 			if cur_correct > max_correct:
@@ -307,7 +311,7 @@ class Moca_train(object):
 					# torch.save(self.model, save_name)
 					logger.info("Model saved to {}".format(save_name))
 		
-		self.source_model = model_weights_update(self.source_model, self.target_model, m=0.95)
+		self.source_model = model_weights_update(self.source_model, self.target_model, m=0.9)
 		# print("self.source_model.metric_feature", self.source_model.metric_feature.weight[0])
 		# print("self.target_model.metric_feature", self.target_model.metric_feature.weight[0])
 		# logger.info("Finished fine tuning.")
@@ -413,8 +417,9 @@ if __name__ == "__main__":
 	
 	fine_tuner = Moca_train(model, args=args)
 	fine_tuner.test(keep_feature=True)
-	fine_tuner.finetune_on_source(epoches=10, save_name=pretrain_model_path)
-	fine_tuner.finetune_on_target(epoches=10, save_name=pretrain_model_path)
+	for _ in trange(10):
+		fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path)
+		fine_tuner.finetune_on_target(epoches=10, save_name=pretrain_model_path)
 	
 	logger.info("\n++++Source:{} to target {} finish!++++".format(args.source, args.target))
 	
