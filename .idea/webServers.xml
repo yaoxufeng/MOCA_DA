@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="c06cab3d-5ffe-4352-9dc1-45da6c8ef5bd" name="MOCA_partialDA_2080" url="http://hk.gamma-cv.site">
+        <fileTransfer host="hk.gamma-cv.site" port="6000" accessType="SFTP">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+          <option name="port" value="6000" />
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

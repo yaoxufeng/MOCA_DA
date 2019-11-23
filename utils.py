@@ -11,6 +11,7 @@ import numpy as np
 import os
 
 from torch.autograd import Function
+import torch.nn.functional as F
 
 logger = logging.getLogger('root')
 
@@ -119,6 +120,7 @@ class Targeted_Dropout(nn.Module):
 		return target_dropout(input, self.targeted_index, self.dropout, self.training)
 
 
+# ========================= Flops calculation ==========================
 def print_model_parm_nums(model):
 	total = sum([param.nelement() for param in model.parameters()])
 	return total
@@ -258,6 +260,119 @@ def AMLoss(pred, pred_label, s=32, m=-0.1, num_class=256):
 	return adjust_theta
 
 
+# =========================  contrastive loss ==========================
+def ContrastiveLoss(pred, pred_idx, queue):
+	'''
+	we implement contrastive loss via the Kaiming He's paper https://arxiv.org/abs/1911.05722
+	:param pred: pred feature of (N, C) where N is batch size, c is the feature vector (perhaps 128 dimension)
+	:param pred_idx: idx of pred_idx
+	:param queue: self.queue which stores all the feature vector of the target data (subsample when data size is large)
+	:return: ContrastiveLoss value
+	'''
+	pred_idx = pred_idx.data.cpu()  # trans to cpu
+	pred_idx = [idx.item() for idx in pred_idx]  # get the value from the tensor
+	pred_q = pred.view(pred.size(0), 1, pred.size(1)).cpu()  # resize for bmm (N, 1, C)
+	# print("pred_q.shape", pred_q.shape)
+	pred_k = torch.cat([queue[idx].view(1, queue[idx].size(0)) for idx in pred_idx], dim=0)  # get the key value from the queue
+	pred_k = pred_k.view(pred_k.size(0), pred_k.size(1), 1)  # (N, C, 1)
+	# print("pred_k.shape", pred_k.shape)
+	neg_k = torch.cat([queue[idx].view(1, queue[idx].size(0)) for idx in queue.keys() if idx not in pred_idx], dim=0)  # extract the rest feature vector as negative weight (k, C)
+	# print("neg_k.shape", neg_k.shape)
+	
+	l_pos = torch.bmm(pred_q, pred_k)  # get the postive value
+	l_pos = l_pos.view(l_pos.size(0), 1)
+	# print("l_pos.shape", l_pos.shape)
+	l_neg = torch.mm(pred_q.view(pred_q.size(0), pred_q.size(2)), neg_k.view(neg_k.size(1), neg_k.size(0)))  # get the negative value
+	# print("l_neg.shape", l_neg.shape)
+	logits = torch.cat([l_pos, l_neg], dim=1)  # the size should be (N, K+1) and the 0th is your true value
+	
+	label = torch.zeros(logits.size(0), dtype=torch.long)  # generate label
+	label[0] = 1.  # the 0th is the true label
+	
+	return F.cross_entropy(12*logits, label)
+	
+	
+# =========================  weights unpdate  ==========================
+def model_weights_update(source_model, target_model, m=0.5):
+	'''
+	:param source_model: source model
+	:param target_model: target model
+	:param m: momentum parameter, it is supposed to be changed every iteration(perhaps one epoch)
+	:return: updated source model
+	'''
+	
+	source_model.cpu()
+	target_model.cpu()
+	
+	# update model.metric_feature.params
+	source_model.metric_feature.weight.data = m * source_model.metric_feature.weight.data + (1-m) * target_model.metric_feature.weight.data
+	source_model.metric_feature.bias.data = m * source_model.metric_feature.bias.data + (1-m) * target_model.metric_feature.bias.data
+	
+	# update model.features.params
+	non_layer_modules = ["conv1", "bn1"]  # eg. model.features._modules["conv1"].weight
+	layer_modules = ["conv1", "bn1", "conv2", "bn2", "conv3", "bn3"]  # eg. model.features._modules[layer_num][num]._modules[layer_module].weight
+	downsample_modules = [0, 1]  # 0 for conv2d, 1 for bn  eg. model.features._modules[layer_num][num]._modules['downsample'][0].weight
+	
+	for name, module in source_model.features._modules.items():
+		if "layer" in name:
+			for index, _ in enumerate(source_model.features._modules[name]):
+				if 'downsample' in source_model.features._modules[name][index]._modules.keys():
+					for downsample_module in downsample_modules:
+						if downsample_module == 0:
+							# update conv weight
+							source_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data = \
+								m * source_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data + (1-m) * \
+								target_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data
+						else:
+							# update bn weight
+							source_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data = \
+								m * source_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data + (1-m) * \
+								target_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data
+							# update bn bias
+							source_model.features._modules[name][index]._modules['downsample'][downsample_module].bias.data = \
+								m * source_model.features._modules[name][index]._modules['downsample'][downsample_module].bias.data + (1-m) * \
+								target_model.features._modules[name][index]._modules['downsample'][downsample_module].bias.data
+				else:
+					for layer_module in layer_modules:
+						if 'conv' in layer_module:
+							# udpate conv weight
+							source_model.features._modules[name][index]._modules[layer_module].weight.data = \
+								m * source_model.features._modules[name][index]._modules[layer_module].weight.data + (1-m) * \
+								target_model.features._modules[name][index]._modules[layer_module].weight.data
+						elif 'bn' in layer_module:
+							# update bn weight
+							source_model.features._modules[name][index]._modules[layer_module].weight.data = \
+								m * source_model.features._modules[name][index]._modules[layer_module].weight.data + (1-m) * \
+								target_model.features._modules[name][index]._modules[layer_module].weight.data
+
+							# update bn bias
+							source_model.features._modules[name][index]._modules[layer_module].bias.data = \
+								m * source_model.features._modules[name][index]._modules[layer_module].bias.data + (1 - m) * \
+								target_model.features._modules[name][index]._modules[layer_module].bias.data
+						else:
+							raise ValueError("there's no {} in layer_module".format(layer_module))
+		else:
+			for non_layer_module in non_layer_modules:
+				if 'conv' in non_layer_module:
+					# update weight for conv
+					source_model.features._modules[non_layer_module].weight.data =\
+						m * source_model.features._modules[non_layer_module].weight.data + (1-m) *\
+						target_model.features._modules[non_layer_module].weight.data
+				elif 'bn' in non_layer_module:
+					# update weight for bn
+					source_model.features._modules[non_layer_module].weight.data =\
+						m * source_model.features._modules[non_layer_module].weight.data + (1-m) *\
+						target_model.features._modules[non_layer_module].weight.data
+					# update bias for bn
+					source_model.features._modules[non_layer_module].bias.data =\
+						m * source_model.features._modules[non_layer_module].bias.data + (1-m) *\
+						target_model.features._modules[non_layer_module].bias.data
+				else:
+					raise ValueError("there's no {} in non_layer_module".format(non_layer_module))
+				
+	return source_model
+	
+	
 if __name__ == "__main__":
 	# test targeted_dropout
 	input = torch.randn(1, 16, 1, 1)

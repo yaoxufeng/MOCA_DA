@@ -120,11 +120,11 @@ class ResNet(nn.Module):
 	# 	self.cls_fc.bias.data.fill_(0.0)
 	# ========================= FBI warning !!! =======================
 		
-	def forward(self, source, target, mode="source"):
+	def forward(self, source, target):
 		source = self.features(source)
 		source_feature = self.metric_feature(source)
 		# ========================= normalize feature ==========================
-		source_feature = F.normalize(source_feature, p=2, dim=1)
+		# source_feature = F.normalize(source_feature, p=2, dim=1)
 		# ========================= FBI warning !!! ============================
 		source_cls = self.cls_fc(source_feature)
 		
@@ -132,7 +132,7 @@ class ResNet(nn.Module):
 			target= self.features(target)
 			target_feature = self.metric_feature(target)
 			# ========================= normalize feature ==========================
-			target_feature = F.normalize(target_feature, p=2, dim=1)
+			# target_feature = F.normalize(target_feature, p=2, dim=1)
 			# ========================= FBI warning !!! ============================
 			target_cls = self.cls_fc(target_feature)
 			return source_cls, target_cls, source_feature, target_feature
