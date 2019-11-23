@@ -114,25 +114,25 @@ class ResNet(nn.Module):
 		self.metric_feature = nn.Linear(2048, 128)
 		self.cls_fc = nn.Linear(128, num_classes)
 	
-	# ========================= normalize fc ==========================
-	# with torch.no_grad():
-	# 	self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
-	# 	self.cls_fc.bias.data.fill_(0.0)
-	# ========================= FBI warning !!! =======================
+		# ========================= normalize fc ==========================
+		with torch.no_grad():
+			self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
+			self.cls_fc.bias.data.fill_(0.0)
+		# ========================= FBI warning !!! =======================
 		
 	def forward(self, source, target):
-		source = self.features(source)
-		source_feature = self.metric_feature(source)
+		source_feature = self.features(source)
+		source_feature = self.metric_feature(source_feature)
 		# ========================= normalize feature ==========================
-		# source_feature = F.normalize(source_feature, p=2, dim=1)
+		source_feature = F.normalize(source_feature, p=2, dim=1)
 		# ========================= FBI warning !!! ============================
 		source_cls = self.cls_fc(source_feature)
 		
 		if self.training:
-			target= self.features(target)
-			target_feature = self.metric_feature(target)
+			target_feature = self.features(target)
+			target_feature = self.metric_feature(target_feature)
 			# ========================= normalize feature ==========================
-			# target_feature = F.normalize(target_feature, p=2, dim=1)
+			target_feature = F.normalize(target_feature, p=2, dim=1)
 			# ========================= FBI warning !!! ============================
 			target_cls = self.cls_fc(target_feature)
 			return source_cls, target_cls, source_feature, target_feature

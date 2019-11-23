@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader, SubsetRandomSampler
 from torch.optim.lr_scheduler import StepLR
 import copy
 from datasets import *
+import data_loader
 from operator import itemgetter
 from models import ResNet
 from utils import *
@@ -103,7 +104,7 @@ def load_imagenet_pretrain(model, base):
 		# pretrained_dict = model_zoo.load_url(url)
 		# model_dict = model.state_dict()
 		for k, v in model_dict.items():
-			if not "cls_fc" in k and not "num_batches_tracked" and not "metric_feature" in k:
+			if not "cls_fc" in k and not "num_batches_tracked" in k and not "metric_feature" in k:
 				model_dict[k] = pretrained_dict[k[k.find(".") + 1:]]
 	
 	model.load_state_dict(model_dict)
@@ -187,6 +188,7 @@ class Moca_train(object):
 		logger.info('Test on target set {}: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
 			self.args.target, test_loss, correct, self.len_target_dataset,
 			100. * correct / self.len_target_dataset))
+	
 		return correct
 
 	def finetune_on_source(self, epoches=10, save_name=None):
@@ -209,29 +211,30 @@ class Moca_train(object):
 				
 			self.source_model.train()
 			
-			# source_idx = self.source_loader.dataset.targets()
 			iter_source = iter(self.source_loader)
 			iter_target = iter(self.target_train_loader)
 			
 			gamma = 2 / (1 + math.exp(-10 * (i * 0.2) / epoches)) - 1.0
 			
 			for b in tqdm(range(1, len(self.source_loader))):
-				# for b in tqdm(range(1, 2)):  # FBI warning, for testing purpose
 				data_source, label_source, source_idx = iter_source.next()
+				
 				data_target, _, target_idx = iter_target.next()
+				
 				if len(data_target < self.args.batch_size):
 					iter_target = iter(self.target_train_loader)
 					data_target, _, target_idx = iter_target.next()
+					
 				data_source, label_source = data_source.cuda(), label_source.cuda()
 				data_target = data_target.cuda()
 				
 				optimizer.zero_grad()
 
-				source_pred, target_pred, source_feature, target_feature = self.source_model(data_source, data_target)
-				loss_cls = F.nll_loss(F.log_softmax(source_pred, dim=1), label_source)
+				source_pred, target_pred, _, target_feature = self.source_model(data_source, data_target)
+				loss_cls = F.nll_loss(F.log_softmax(16*source_pred, dim=1), label_source)
 				# loss_entropy_min = EntropyMinLoss(F.softmax(torch.cat([source_pred, target_pred], dim=0), dim=1))  # entropy minimization loss
-				loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
-				total_loss = loss_cls
+				loss_entropy_min = EntropyMinLoss(F.softmax(32*target_pred, dim=1))
+				total_loss = loss_cls + 0.1 * loss_entropy_min
 
 				total_loss.backward()
 				optimizer.step()
@@ -254,10 +257,8 @@ class Moca_train(object):
 				if save_name:
 					# torch.save(self.model, save_name)
 					logger.info("Model saved to {}".format(save_name))
-			logger.info('Finetune on {} max correct: {} max accuracy{: .2f}%\n'.format(self.args.source, max_correct,
-			                                                                           100.0 * max_correct / self.len_source_dataset))
 		
-		print("self.source_model.metric_fc", self.source_model.metric_feature.weight[0])
+		# print("self.source_model.metric_fc", self.source_model.metric_feature.weight[0])
 		# logger.info("Finished fine tuning.")
 	
 
@@ -305,8 +306,6 @@ class Moca_train(object):
 				if save_name:
 					# torch.save(self.model, save_name)
 					logger.info("Model saved to {}".format(save_name))
-			logger.info('Finetune on {} max correct: {} max accuracy{: .2f}%\n'.format(self.args.source, max_correct,
-			                                                                           100.0 * max_correct / self.len_source_dataset))
 		
 		self.source_model = model_weights_update(self.source_model, self.target_model, m=0.95)
 		# print("self.source_model.metric_feature", self.source_model.metric_feature.weight[0])
@@ -322,7 +321,7 @@ def get_args():
     parser.add_argument("--source", type=str, default="")
     parser.add_argument("--target", type=str, default="")
     parser.add_argument("--threshold", type=float, default=0.8)
-    parser.add_argument("--batch_size", type=int, default=16)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--arc", type=str, default="resnet50")
     parser.add_argument("--seed", type=int, default=9)
@@ -363,7 +362,7 @@ if __name__ == "__main__":
 	if args.mode == 'train':
 		logger.info("Finetune a model pretrained on ImageNet\n")
 		if args.arc == "resnet50":
-			model = ResNet()
+			model = ResNet(num_classes=31)
 			model = load_imagenet_pretrain(model, "resnet50")
 		else:
 			raise ValueError("the model arc {} is not provided yet".format(args.arc))
@@ -384,7 +383,7 @@ if __name__ == "__main__":
 	transformer_train = model.train_augmentation()
 	transformer_train_multi = model.train_multi_augmentation()
 	transformer_test = model.test_augmentation()
-	
+
 	source_loader = DataLoader(
 		OfficeDataSet(data_path=os.path.join(args.train_dir, args.source, "images"), transformer=transformer_train),
 		batch_size=args.batch_size,
@@ -393,7 +392,7 @@ if __name__ == "__main__":
 		drop_last=True,
 		pin_memory=False,
 	)
-	
+
 	target_train_loader = DataLoader(
 		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_train),
 		batch_size=args.batch_size,
@@ -402,7 +401,7 @@ if __name__ == "__main__":
 		drop_last=False,
 		pin_memory=False
 	)
-	
+
 	# load target dataset for testing, its label is used for testing until the whole training process ends.
 	target_test_loader = DataLoader(
 		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_test),
@@ -415,7 +414,7 @@ if __name__ == "__main__":
 	fine_tuner = Moca_train(model, args=args)
 	fine_tuner.test(keep_feature=True)
 	fine_tuner.finetune_on_source(epoches=10, save_name=pretrain_model_path)
-	fine_tuner.finetune_on_target(epoches=1, save_name=pretrain_model_path)
+	fine_tuner.finetune_on_target(epoches=10, save_name=pretrain_model_path)
 	
 	logger.info("\n++++Source:{} to target {} finish!++++".format(args.source, args.target))
 	
