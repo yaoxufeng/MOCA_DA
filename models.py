@@ -115,9 +115,9 @@ class ResNet(nn.Module):
 		self.cls_fc = nn.Linear(128, num_classes)
 	
 		# ========================= normalize fc ==========================
-		with torch.no_grad():
-			self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
-			self.cls_fc.bias.data.fill_(0.0)
+		# with torch.no_grad():
+		# 	self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
+		# 	self.cls_fc.bias.data.fill_(0.0)
 		# ========================= FBI warning !!! =======================
 		
 	def forward(self, source, target):
@@ -151,7 +151,7 @@ class ResNet(nn.Module):
 	# we use the data augmentation method used in Kaiming He's paper
 	def train_augmentation(self):
 		return transforms.Compose([
-			transforms.RandomResizedCrop(224, scale=(0.3, 1.0), ratio=(0.7, 1.4),
+			transforms.RandomResizedCrop(224, scale=(0.5, 1.0), ratio=(0.7, 1.2),
 			                             interpolation=3),
 			transforms.RandomHorizontalFlip(),
 			transforms.RandomGrayscale(p=0.25),

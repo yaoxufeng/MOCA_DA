@@ -34,6 +34,7 @@ import datetime
 import operator
 import copy
 
+
 def set_seed():
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -162,6 +163,7 @@ class Moca_train(object):
 		print("\ntesting on target dataset!")
 		
 		for _, (data, target, target_idx) in tqdm(enumerate(test_data)):
+			data, target, target_idx = data[0], target[0], target_idx[0]
 			data, target = data.cuda(), target.cuda()
 			if mode == "source":
 				t_output, target_feature = self.source_model(data, data)
@@ -218,12 +220,15 @@ class Moca_train(object):
 			
 			for b in tqdm(range(1, len(self.source_loader))):
 				data_source, label_source, source_idx = iter_source.next()
+				data_source, label_source, source_idx = data_source[0], label_source[0], source_idx[0]
 				
 				data_target, _, target_idx = iter_target.next()
+				data_target, target_idx = data_target[0], target_idx[0]
 				
 				if len(data_target < self.args.batch_size):
 					iter_target = iter(self.target_train_loader)
 					data_target, _, target_idx = iter_target.next()
+					data_target, target_idx = data_target[0], target_idx[0]
 					
 				data_source, label_source = data_source.cuda(), label_source.cuda()
 				data_target = data_target.cuda()
@@ -234,7 +239,7 @@ class Moca_train(object):
 				loss_cls = F.nll_loss(F.log_softmax(12*source_pred, dim=1), label_source)
 				# loss_entropy_min = EntropyMinLoss(F.softmax(torch.cat([source_pred, target_pred], dim=0), dim=1))  # entropy minimization loss
 				loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
-				total_loss = loss_cls + 0.1 * loss_entropy_min
+				total_loss = loss_cls
 
 				total_loss.backward()
 				optimizer.step()
@@ -259,17 +264,17 @@ class Moca_train(object):
 					# torch.save(self.model, save_name)
 					logger.info("Model saved to {}".format(save_name))
 					
-		# self.target_model = model_weights_update(self.target_model, self.source_model, m=0.95)
+		self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9)
 		# print("self.source_model.metric_fc", self.source_model.metric_feature.weight[0])
 		# logger.info("Finished fine tuning.")
 	
 
-	def finetune_on_target(self, epoches=5, save_name=None, keep_feature=True):
+	def finetune_on_target(self, epoches=5, save_name=None, keep_feature=True, reverse=False):
 		max_correct = 0
 		self.target_model = model_fc_update(self.source_model, self.target_model)
 		self.target_model.cuda()
 		
-		self.target_model.cls_fc.require_grad = False
+		# self.target_model.cls_fc.require_grad = False
 		
 		for i in trange(epoches):
 			logger.info("Epoch: {}".format(i + 1))
@@ -290,21 +295,39 @@ class Moca_train(object):
 			gamma = 2 / (1 + math.exp(-10 * (i * 0.2) / epoches)) - 1.0
 			
 			for _, (data_target, _, target_idx) in tqdm(enumerate(self.target_train_loader)):
-				data_target = data_target.cuda()
+				
+				data_q_target, target_q_idx = data_target[0], target_idx[0]
+				data_k_target, target_k_idx = data_target[1], target_idx[1]
+				
+				data_q_target = data_q_target.cuda()
+				data_k_target = data_k_target.cuda()
+				
 				optimizer.zero_grad()
 				
-				target_pred, _, target_feature, _ = self.target_model(data_target, data_target)
-				# loss_contrastive = ContrastiveLoss(target_feature, target_idx, self.queue)
-				logits, label_target = ContrastiveLoss(target_feature, target_idx, self.queue)
-				loss_cls = F.nll_loss(F.log_softmax(16*logits, dim=1), label_target)
+				target_q_pred, target_k_pred, target_q_feature, target_k_feature = self.target_model(data_q_target, data_k_target)
+				logits_q, label_q_target = ContrastiveLoss(target_q_feature, target_q_idx, self.queue)
+				logits_k, label_k_target = ContrastiveLoss(target_k_feature, target_k_idx, self.queue)
+				
+				# logits, label_target = ContrastiveLoss(target_q_feature, target_k_feature, target_q_idx, self.queue)
+				loss_q_cls = F.nll_loss(F.log_softmax(16*logits_q, dim=1), label_q_target)
+				loss_k_cls = F.nll_loss(F.log_softmax(16*logits_k, dim=1), label_k_target)
+				
+				loss_consistency = ConsistencyLoss(target_q_feature, target_k_feature)
 				# loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
-				total_loss = loss_cls
+				if reverse:
+					total_loss = loss_q_cls + loss_k_cls + loss_consistency
+				else:
+					total_loss = loss_q_cls + loss_k_cls + 5 * loss_consistency
 				
 				total_loss.backward()
 				optimizer.step()
 			
 			logger.info("train epoch {}".format(i + 1))
-			logger.info("train loss_cls {}".format(loss_cls))
+			logger.info("train loss_cls_q {}".format(loss_q_cls))
+			logger.info("train loss_cls_k {}".format(loss_k_cls))
+			
+			logger.info("train loss_consistency {}".format(loss_consistency))
+			
 			# logger.info("train loss_entropy_min {}".format(loss_entropy_min))
 			
 			if keep_feature:
@@ -324,7 +347,7 @@ class Moca_train(object):
 					logger.info("Model saved to {}".format(save_name))
 		
 		self.source_model = model_weights_update(self.source_model, self.target_model, m=0.9)
-		# print("self.source_model.metric_feature", self.source_model.metric_feature.weight[0])
+		# print("self.source_model.metric_feature", self.source_model.metric_fesature.weight[0])
 		# print("self.target_model.metric_feature", self.target_model.metric_feature.weight[0])
 		# logger.info("Finished fine tuning.")
 
@@ -345,7 +368,7 @@ def get_args():
     parser.add_argument('--use-cuda', action='store_true', default=True, help='Use NVIDIA GPU acceleration')
     parser.add_argument("--pruned_model_dir", type=str, default="", help="pruned model path")
     parser.add_argument("--gpu_ids", nargs='+', type=int, default=None)
-    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
     args.use_cuda = args.use_cuda and torch.cuda.is_available()
 
@@ -396,12 +419,17 @@ if __name__ == "__main__":
 	
 	# load target dataset for training, its label is not used for training default multi gpu
 	
-	transformer_train = model.train_augmentation()
-	transformer_train_multi = model.train_multi_augmentation()
-	transformer_test = model.test_augmentation()
+	if len(args.gpu_ids) > 1:
+		transformer_train = model.module.train_augmentation()
+		transformer_train_multi = model.module.train_multi_augmentation()
+		transformer_test = model.module.test_augmentation()
+	else:
+		transformer_train = model.train_augmentation()
+		transformer_train_multi = model.train_multi_augmentation()
+		transformer_test = model.test_augmentation()
 
 	source_loader = DataLoader(
-		OfficeDataSet(data_path=os.path.join(args.train_dir, args.source, "images"), transformer=transformer_train),
+		OfficeDataSet(data_path=os.path.join(args.train_dir, args.source, "images"), transformer=transformer_train, k=1),
 		batch_size=args.batch_size,
 		num_workers=args.workers,
 		shuffle=True,
@@ -410,7 +438,7 @@ if __name__ == "__main__":
 	)
 
 	target_train_loader = DataLoader(
-		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_train),
+		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_train, k=2),
 		batch_size=args.batch_size,
 		num_workers=args.workers,
 		shuffle=True,
@@ -420,19 +448,22 @@ if __name__ == "__main__":
 
 	# load target dataset for testing, its label is used for testing until the whole training process ends.
 	target_test_loader = DataLoader(
-		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_test),
+		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_test, k=1),
 		batch_size=args.batch_size,
 		num_workers=args.workers,
 		shuffle=False,
 		pin_memory=False
 	)
-	
+
 	fine_tuner = Moca_train(model, args=args)
 	fine_tuner.test(keep_feature=True)
 	for _ in trange(10):
 		fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path, keep_feature=True)
-		fine_tuner.finetune_on_target(epoches=10, save_name=pretrain_model_path, keep_feature=False)
-			
+		if _ < 3:
+			fine_tuner.finetune_on_target(epoches=10, save_name=pretrain_model_path, keep_feature=False, reverse=True)
+		else:
+			fine_tuner.finetune_on_target(epoches=10, save_name=pretrain_model_path, keep_feature=False, reverse=False)
+
 	logger.info("\n++++Source:{} to target {} finish!++++".format(args.source, args.target))
 	
 	

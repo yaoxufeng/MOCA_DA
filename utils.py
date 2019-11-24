@@ -236,6 +236,12 @@ def print_model_parm_flops(model, list_mask_sparsity=None):
 	return total_flops
 
 
+# ========================= convert data and label for multi transformation usage ==========================
+# convert multi transform data
+def convert_batch_data(batch_data):
+	return batch_data.view(batch_data.size(0)*batch_data.size(1), batch_data.size(2), batch_data.size(3), batch_data.size(4))
+
+
 # ========================= Entropy Minimization loss ==========================
 def EntropyMinLoss(pred):
 	"""
@@ -278,20 +284,62 @@ def ContrastiveLoss(pred, pred_idx, queue):
 	# print("pred_k.shape", pred_k.shape)
 	neg_k = torch.cat([queue[idx].view(1, queue[idx].size(0)) for idx in queue.keys() if idx not in pred_idx], dim=0)  # extract the rest feature vector as negative weight (k, C)
 	# print("neg_k.shape", neg_k.shape)
-	
+
 	l_pos = torch.bmm(pred_q, pred_k)  # get the postive value
 	l_pos = l_pos.view(l_pos.size(0), 1)
 	# print("l_pos.shape", l_pos.shape)
 	l_neg = torch.mm(pred_q.view(pred_q.size(0), pred_q.size(2)), neg_k.view(neg_k.size(1), neg_k.size(0)))  # get the negative value
 	# print("l_neg.shape", l_neg.shape)
 	logits = torch.cat([l_pos, l_neg], dim=1)  # the size should be (N, K+1) and the 0th is your true value
-	
+
 	label = torch.zeros(logits.size(0), dtype=torch.long)  # generate label
-	label[0] = 1.  # the 0th is the true label
-	
+	label[0] = 0.9  # the 0th is the true label
+
 	# return F.cross_entropy(16*logits, label)
 	return logits.cuda(), label.cuda()
-	
+
+
+# =========================  consistency loss ==========================
+def ConsistencyLoss(pred_q, pred_k, reverse=False):
+	l2loss = torch.sum(torch.abs(pred_q-pred_k))
+	if reverse:
+		return torch.clamp(1-l2loss, 0, 1)
+	else:
+		return torch.clamp(l2loss, 0, 1)
+
+
+# ========================= another version of contrastive loss failed ==========================
+# def ContrastiveLoss(pred_q, pred_k, pred_idx, queue):
+# 	'''
+# 	we implement contrastive loss via the Kaiming He's paper https://arxiv.org/abs/1911.05722
+# 	:param pred: pred feature of (N, C) where N is batch size, c is the feature vector (perhaps 128 dimension)
+# 	:param pred_idx: idx of pred_idx
+# 	:param queue: self.queue which stores all the feature vector of the target data (subsample when data size is large)
+# 	:return: ContrastiveLoss value
+# 	'''
+# 	pred_idx = pred_idx.data.cpu()  # trans to cpu
+# 	pred_idx = [idx.item() for idx in pred_idx]  # get the value from the tensor
+# 	pred_q = pred_q.view(pred_q.size(0), 1, pred_q.size(1)).cpu()  # resize for bmm (N, 1, C)
+# 	# print("pred_q.shape", pred_q.shape)
+# 	pred_k = pred_k.view(pred_k.size(0), pred_k.size(1), 1).cpu()  # resize for bmm (N, C, 1)
+#
+# 	# print("pred_k.shape", pred_k.shape)
+# 	neg_k = torch.cat([queue[idx].view(1, queue[idx].size(0)) for idx in queue.keys() if idx not in pred_idx], dim=0)  # extract the rest feature vector as negative weight (k, C)
+# 	# print("neg_k.shape", neg_k.shape)
+#
+# 	l_pos = torch.bmm(pred_q, pred_k)  # get the postive value
+# 	l_pos = l_pos.view(l_pos.size(0), 1)
+# 	# print("l_pos.shape", l_pos.shape)
+# 	l_neg = torch.mm(pred_q.view(pred_q.size(0), pred_q.size(2)), neg_k.view(neg_k.size(1), neg_k.size(0)))  # get the negative value
+# 	# print("l_neg.shape", l_neg.shape)
+# 	logits = torch.cat([l_pos, l_neg], dim=1)  # the size should be (N, K+1) and the 0th is your true value
+#
+# 	label = torch.zeros(logits.size(0), dtype=torch.long)  # generate label
+# 	label[0] = 0.9  # the 0th is the true label
+#
+# 	# return F.cross_entropy(16*logits, label)
+# 	return logits.cuda(), label.cuda()
+
 	
 # =========================  fc unpdate  ==============================
 def model_fc_update(source_model, target_model):
