@@ -289,7 +289,8 @@ def ContrastiveLoss(pred, pred_idx, queue):
 	label = torch.zeros(logits.size(0), dtype=torch.long)  # generate label
 	label[0] = 1.  # the 0th is the true label
 	
-	return F.cross_entropy(12*logits, label)
+	# return F.cross_entropy(16*logits, label)
+	return logits.cuda(), label.cuda()
 	
 	
 # =========================  fc unpdate  ==============================

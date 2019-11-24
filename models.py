@@ -115,9 +115,9 @@ class ResNet(nn.Module):
 		self.cls_fc = nn.Linear(128, num_classes)
 	
 		# ========================= normalize fc ==========================
-		# with torch.no_grad():
-		# 	self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
-		# 	self.cls_fc.bias.data.fill_(0.0)
+		with torch.no_grad():
+			self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
+			self.cls_fc.bias.data.fill_(0.0)
 		# ========================= FBI warning !!! =======================
 		
 	def forward(self, source, target):
@@ -139,11 +139,24 @@ class ResNet(nn.Module):
 		else:
 			return source_cls, source_feature
 	
+	# def train_augmentation(self):
+	# 	return transforms.Compose([
+	# 		transforms.Resize(256),
+	# 		transforms.RandomResizedCrop(224),
+	# 		transforms.RandomHorizontalFlip(),
+	# 		transforms.ToTensor(),
+	# 		transforms.Normalize(mean=self.input_mean, std=self.input_std)
+	# 	])
+	
+	# we use the data augmentation method used in Kaiming He's paper
 	def train_augmentation(self):
 		return transforms.Compose([
-			transforms.Resize(256),
-			transforms.RandomResizedCrop(224),
+			transforms.RandomResizedCrop(224, scale=(0.3, 1.0), ratio=(0.7, 1.4),
+			                             interpolation=3),
 			transforms.RandomHorizontalFlip(),
+			transforms.RandomGrayscale(p=0.25),
+			transforms.RandomApply([
+				transforms.ColorJitter(0.4, 0.4, 0.4, 0.2)], p=0.8),
 			transforms.ToTensor(),
 			transforms.Normalize(mean=self.input_mean, std=self.input_std)
 		])
