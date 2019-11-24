@@ -301,11 +301,12 @@ def ContrastiveLoss(pred, pred_idx, queue):
 
 # =========================  consistency loss ==========================
 def ConsistencyLoss(pred_q, pred_k, reverse=False):
-	l2loss = torch.sum(torch.abs(pred_q-pred_k))
+	l2loss = torch.sum((pred_q-pred_k)**2)
+	# print("l2loss", l2loss)
 	if reverse:
-		return torch.clamp(1-l2loss, 0, 1)
+		return torch.clamp(5-l2loss, 0, 5)
 	else:
-		return torch.clamp(l2loss, 0, 1)
+		return l2loss
 
 
 # ========================= another version of contrastive loss failed ==========================

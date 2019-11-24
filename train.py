@@ -239,7 +239,7 @@ class Moca_train(object):
 				loss_cls = F.nll_loss(F.log_softmax(12*source_pred, dim=1), label_source)
 				# loss_entropy_min = EntropyMinLoss(F.softmax(torch.cat([source_pred, target_pred], dim=0), dim=1))  # entropy minimization loss
 				loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
-				total_loss = loss_cls
+				total_loss = loss_cls + 0.1 * loss_entropy_min
 
 				total_loss.backward()
 				optimizer.step()
@@ -312,12 +312,12 @@ class Moca_train(object):
 				loss_q_cls = F.nll_loss(F.log_softmax(16*logits_q, dim=1), label_q_target)
 				loss_k_cls = F.nll_loss(F.log_softmax(16*logits_k, dim=1), label_k_target)
 				
-				loss_consistency = ConsistencyLoss(target_q_feature, target_k_feature)
+				loss_consistency = ConsistencyLoss(target_q_feature, target_k_feature, reverse=reverse)
 				# loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
 				if reverse:
 					total_loss = loss_q_cls + loss_k_cls + loss_consistency
 				else:
-					total_loss = loss_q_cls + loss_k_cls + 5 * loss_consistency
+					total_loss = 2 * loss_q_cls + 2 * loss_k_cls + loss_consistency
 				
 				total_loss.backward()
 				optimizer.step()
@@ -460,9 +460,9 @@ if __name__ == "__main__":
 	for _ in trange(10):
 		fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path, keep_feature=True)
 		if _ < 3:
-			fine_tuner.finetune_on_target(epoches=10, save_name=pretrain_model_path, keep_feature=False, reverse=True)
+			fine_tuner.finetune_on_target(epoches=5, save_name=pretrain_model_path, keep_feature=False, reverse=True)
 		else:
-			fine_tuner.finetune_on_target(epoches=10, save_name=pretrain_model_path, keep_feature=False, reverse=False)
+			fine_tuner.finetune_on_target(epoches=5, save_name=pretrain_model_path, keep_feature=False, reverse=False)
 
 	logger.info("\n++++Source:{} to target {} finish!++++".format(args.source, args.target))
 	
