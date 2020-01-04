@@ -120,6 +120,25 @@ class ResNet(nn.Module):
 		# 	self.cls_fc.bias.data.fill_(0.0)
 		# ========================= FBI warning !!! =======================
 		
+	# def forward(self, source, target):
+	# 	source_feature = self.features(source)
+	# 	source_feature = self.metric_feature(source_feature)
+	# 	# ========================= normalize feature ==========================
+	# 	source_feature = F.normalize(source_feature, p=2, dim=1)
+	# 	# ========================= FBI warning !!! ============================
+	# 	source_cls = self.cls_fc(source_feature)
+	#
+	# 	if self.training:
+	# 		target_feature = self.features(target)
+	# 		target_feature = self.metric_feature(target_feature)
+	# 		# ========================= normalize feature ==========================
+	# 		target_feature = F.normalize(target_feature, p=2, dim=1)
+	# 		# ========================= FBI warning !!! ============================
+	# 		target_cls = self.cls_fc(target_feature)
+	# 		return source_cls, target_cls, source_feature, target_feature
+	# 	else:
+	# 		return source_cls, source_feature
+	
 	def forward(self, source, target):
 		source_feature = self.features(source)
 		source_feature = self.metric_feature(source_feature)
@@ -127,7 +146,7 @@ class ResNet(nn.Module):
 		source_feature = F.normalize(source_feature, p=2, dim=1)
 		# ========================= FBI warning !!! ============================
 		source_cls = self.cls_fc(source_feature)
-		
+
 		if self.training:
 			target_feature = self.features(target)
 			target_feature = self.metric_feature(target_feature)
@@ -138,15 +157,7 @@ class ResNet(nn.Module):
 			return source_cls, target_cls, source_feature, target_feature
 		else:
 			return source_cls, source_feature
-	
-	# def train_augmentation(self):
-	# 	return transforms.Compose([
-	# 		transforms.Resize(256),
-	# 		transforms.RandomResizedCrop(224),
-	# 		transforms.RandomHorizontalFlip(),
-	# 		transforms.ToTensor(),
-	# 		transforms.Normalize(mean=self.input_mean, std=self.input_std)
-	# 	])
+
 	
 	# we use the data augmentation method used in Kaiming He's paper
 	def train_augmentation(self):

@@ -19,7 +19,6 @@ from torch.utils.data import DataLoader, SubsetRandomSampler
 from torch.optim.lr_scheduler import StepLR
 import copy
 from datasets import *
-import data_loader
 from operator import itemgetter
 from models import ResNet
 from utils import *
@@ -53,8 +52,6 @@ def load_original(model, model_path, base):
 	model.load_state_dict(model_dict)
 	
 	if len(args.gpu_ids) > 1:
-		# model.features = nn.DataParallel(model.features, device_ids=args.gpu_ids).cuda()
-		# model.cuda()
 		model = nn.DataParallel(model, device_ids=args.gpu_ids).cuda()
 	else:
 		model.cuda()
@@ -132,7 +129,7 @@ class Moca_train(object):
 		self.len_source_dataset = len(self.source_loader.dataset)
 		self.len_target_dataset = len(self.target_test_loader.dataset)
 		if len(args.gpu_ids) > 1:
-			self.source_model = nn.DataParallel(model, device_ids=args.gpu_ids).cuda()
+			self.source_model = model.cuda()
 			self.target_model = copy.deepcopy(self.source_model)  # init target_model with source_model
 		else:
 			self.source_model = model.cuda()
@@ -166,10 +163,16 @@ class Moca_train(object):
 			data, target, target_idx = data[0], target[0], target_idx[0]
 			data, target = data.cuda(), target.cuda()
 			if mode == "source":
-				t_output, target_feature = self.source_model(data, data)
+				if len(args.gpu_ids) > 1:
+					t_output, target_feature = self.source_model.module(data, data)
+				else:
+					t_output, target_feature = self.source_model(data, data)
 			else:
-				t_output, target_feature = self.target_model(data, data)
-			
+				if len(args.gpu_ids) > 1:
+					t_output, target_feature = self.target_model.module(data, data)
+				else:
+					t_output, target_feature = self.target_model(data, data)
+				
 			test_loss += F.nll_loss(F.log_softmax(t_output, dim=1), target,
 			                        reduction='sum').item()  # sum up batch loss
 			pred = t_output.data.max(1)[1]  # get the index of the max log-probability
@@ -181,32 +184,44 @@ class Moca_train(object):
 				for idx, feature in zip(target_idx, target_feature):
 					idx = idx.item()
 					if idx in self.queue.keys():
-						self.queue.pop(idx)  # delete the last idx and its feature
-					self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
+						self.queue[idx] = 0.5 * feature.detach().data.cpu() + 0.5 * self.queue[idx] # update new idx and its feature
+						# self.queue.pop(idx)  # delete the last idx and its feature
+					else:
+						self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
 					
 		print("queue length", len(self.queue.keys()))
 		
 		test_loss /= self.len_target_dataset
-		logger.info('Test on target set {}: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
-			self.args.target, test_loss, correct, self.len_target_dataset,
+		logger.info('Test on source set {} -> target set {}: Average loss: {:.4f}, Accuracy: {}/{} ({:.2f}%)\n'.format(
+			self.args.source, self.args.target, test_loss, correct, self.len_target_dataset,
 			100. * correct / self.len_target_dataset))
 	
 		return correct
 
-	def finetune_on_source(self, epoches=10, save_name=None, keep_feature=False):
+	def finetune_on_source(self, epoches=10, save_name=None, keep_feature=False, stage=None):
 		max_correct = 0
+		
+		# if stage == "two":
+		# 	self.source_model = model_fc_update(self.target_model, self.source_model, gpu_num=len(args.gpu_ids), m=0.1)
+			
 		self.source_model.cuda()
 		
 		for i in trange(epoches):
-			logger.info("Epoch: {}".format(i + 1))
+			for _ in range(64):
+				print("#", end="")
+			logger.info("fine tune on source Epoch: {}".format(i + 1))
 			
 			if args.arc == "resnet50":
 				LEARNING_RATE = 0.015 / math.pow((1 + 10 * i / epoches), 0.75)  # 10*
-				optimizer = torch.optim.SGD([
-					{'params': self.source_model.features.parameters()},
-					{'params': self.source_model.metric_feature.parameters()},
-					{'params': self.source_model.cls_fc.parameters(), 'lr': LEARNING_RATE},
-				], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+
+				if len(args.gpu_ids) > 1:
+					optimizer = torch.optim.SGD(self.source_model.module.parameters(), lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+				else:
+					optimizer = torch.optim.SGD([
+						{'params': self.source_model.features.parameters()},
+						{'params': self.source_model.metric_feature.parameters()},
+						{'params': self.source_model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+					], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
 			
 			for param_group in optimizer.param_groups:
 				logger.info("Learning rate: {}".format(param_group['lr']))
@@ -220,26 +235,54 @@ class Moca_train(object):
 			
 			for b in tqdm(range(1, len(self.source_loader))):
 				data_source, label_source, source_idx = iter_source.next()
-				data_source, label_source, source_idx = data_source[0], label_source[0], source_idx[0]
+				data_source_k, label_source_k, source_idx = data_source[0], label_source[0], source_idx[0]
+				data_source_q, _, _ = data_source[1], label_source[1], source_idx[1]
 				
 				data_target, _, target_idx = iter_target.next()
-				data_target, target_idx = data_target[0], target_idx[0]
+				data_target_k, target_idx = data_target[0], target_idx[0]
+				data_target_q, _ = data_target[1], target_idx[1]
 				
-				if len(data_target < self.args.batch_size):
+				if len(data_target_k < self.args.batch_size):
 					iter_target = iter(self.target_train_loader)
 					data_target, _, target_idx = iter_target.next()
-					data_target, target_idx = data_target[0], target_idx[0]
+					data_target_k, target_idx = data_target[0], target_idx[0]
+					data_target_q, _ = data_target[1], target_idx[1]
 					
-				data_source, label_source = data_source.cuda(), label_source.cuda()
-				data_target = data_target.cuda()
+				data_source_k, label_source = data_source_k.cuda(), label_source_k.cuda()
+				data_source_q = data_source_q.cuda()
+				
+				data_target_k = data_target_k.cuda()
+				data_target_q = data_target_q.cuda()
 				
 				optimizer.zero_grad()
 
-				source_pred, target_pred, _, target_feature = self.source_model(data_source, data_target)
+				if len(args.gpu_ids) > 1:
+					source_pred_k, target_pred_k, source_feature_k, target_feature_k = self.source_model.module(data_source_k, data_target_k)
+					# source_pred_q, target_pred_q, source_feature_q, target_feature_q = self.source_model.module(data_source_q, data_target_q)
+				else:
+					source_pred_k, target_pred_k, source_feature_k, target_feature_k = self.source_model(data_source_k, data_target_k)
+					# source_pred_q, target_pred_q, source_feature_q, target_feature_q = self.source_model(data_source_q, data_target_q)
+				
+				# source_feature = 1. * (source_feature_k + source_feature_q) / 2.
+				# source_pred = 1. * (source_pred_k + source_pred_q) / 2.
+				source_feature = source_feature_k
+				source_pred = source_pred_k
+				
+				# target_feature = 1. * (target_feature_k + target_feature_q) / 2.
+				# target_pred = 1. * (target_pred_k + target_pred_q) / 2.
+				target_feature = target_feature_k
+				target_pred = target_pred_k
+				
 				loss_cls = F.nll_loss(F.log_softmax(12*source_pred, dim=1), label_source)
+				# loss_consistency = ConsistencyLoss(source_feature_k, source_feature_q, reverse=False, mode="l2")
 				# loss_entropy_min = EntropyMinLoss(F.softmax(torch.cat([source_pred, target_pred], dim=0), dim=1))  # entropy minimization loss
 				loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
-				total_loss = loss_cls + 0.1 * loss_entropy_min
+				if stage == "one":
+					total_loss = loss_cls + 0.1 * loss_entropy_min
+				# elif stage == "two":
+				# 	total_loss = loss_cls + loss_entropy_min
+				# else:
+				# 	pass
 
 				total_loss.backward()
 				optimizer.step()
@@ -250,12 +293,15 @@ class Moca_train(object):
 					for idx, feature in zip(target_idx, target_feature):
 						idx = idx.item()
 						if idx in self.queue.keys():
-							self.queue.pop(idx)  # delete the last idx and its feature
-						self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
+							self.queue[idx] = 0.5 * self.queue[idx] + 0.5 * feature.detach().data.cpu()
+							# self.queue.pop(idx)  # delete the last idx and its feature
+						else:
+							self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
 
 			logger.info("train epoch {}".format(i + 1))
 			logger.info("train loss_cls {}".format(loss_cls))
 			logger.info("train loss_entropy_min {}".format(loss_entropy_min))
+			# logger.info("train loss_consistency {}".format(loss_consistency))
 			
 			cur_correct = self.test(mode="source")
 			if cur_correct > max_correct:
@@ -264,29 +310,43 @@ class Moca_train(object):
 					# torch.save(self.model, save_name)
 					logger.info("Model saved to {}".format(save_name))
 					
-		self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9)
-		# print("self.source_model.metric_fc", self.source_model.metric_feature.weight[0])
-		# logger.info("Finished fine tuning.")
-	
+		if stage == "one":
+			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9, gpu_num=len(args.gpu_ids))
+		# elif stage == "two":
+		# 	self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9)
+		# else:
+		# 	pass
 
-	def finetune_on_target(self, epoches=5, save_name=None, keep_feature=True, reverse=False):
+
+	def finetune_on_target(self, epoches=5, save_name=None, keep_feature=True, reverse=False, stage=None):
 		max_correct = 0
-		self.target_model = model_fc_update(self.source_model, self.target_model)
+		if stage == "one":
+			self.target_model = model_fc_update(self.source_model, self.target_model, gpu_num=len(args.gpu_ids))
+			# freeze the weight of fc
+			# for param in self.target_model.cls_fc.parameters():
+			# 	param.requires_grad = False
+				
 		self.target_model.cuda()
 		
 		# self.target_model.cls_fc.require_grad = False
 		
 		for i in trange(epoches):
-			logger.info("Epoch: {}".format(i + 1))
+			for _ in range(64):
+				print("#", end="")
+			logger.info("fine tune on target stage {} Epoch: {}".format(stage, i + 1))
 			
 			if args.arc == "resnet50":
 				LEARNING_RATE = 0.015 / math.pow((1 + 10 * i / epoches), 0.75)  # 10*
-				optimizer = torch.optim.SGD([
-					{'params': self.target_model.features.parameters()},
-					{'params': self.target_model.metric_feature.parameters()},
-					# {'params': self.target_model.cls_fc.parameters(), 'lr': LEARNING_RATE},
-				], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
-			
+				if len(args.gpu_ids) > 1:
+					optimizer = torch.optim.SGD(self.source_model.module.parameters(), lr=LEARNING_RATE / 10, momentum=0.9,
+			                            weight_decay=5e-4)
+				else:
+					optimizer = torch.optim.SGD([
+						{'params': self.target_model.features.parameters()},
+						{'params': self.target_model.metric_feature.parameters()},
+						# {'params': self.target_model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+					], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+					
 			for param_group in optimizer.param_groups:
 				logger.info("Learning rate: {}".format(param_group['lr']))
 			
@@ -304,7 +364,14 @@ class Moca_train(object):
 				
 				optimizer.zero_grad()
 				
-				target_q_pred, target_k_pred, target_q_feature, target_k_feature = self.target_model(data_q_target, data_k_target)
+				if len(args.gpu_ids) > 1:
+					target_q_pred, target_k_pred, target_q_feature, target_k_feature = self.target_model.module(data_q_target, data_k_target)
+				else:
+					target_q_pred, target_k_pred, target_q_feature, target_k_feature = self.target_model(data_q_target, data_k_target)
+
+				target_feature = 1. * (target_q_feature + target_k_feature) / 2.
+				
+				loss_discrepancy = DiscrepancyLoss(target_q_pred, target_k_pred, reverse=reverse, mode="l1")
 				logits_q, label_q_target = ContrastiveLoss(target_q_feature, target_q_idx, self.queue)
 				logits_k, label_k_target = ContrastiveLoss(target_k_feature, target_k_idx, self.queue)
 				
@@ -312,12 +379,24 @@ class Moca_train(object):
 				loss_q_cls = F.nll_loss(F.log_softmax(16*logits_q, dim=1), label_q_target)
 				loss_k_cls = F.nll_loss(F.log_softmax(16*logits_k, dim=1), label_k_target)
 				
-				loss_consistency = ConsistencyLoss(target_q_feature, target_k_feature, reverse=reverse)
-				# loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
+				loss_consistency = ConsistencyLoss(target_q_feature, target_k_feature, reverse=reverse, mode="l2")
+				# target_q_feature_queue = torch.tensor([self.queue[idx.item()] for idx in target_q_idx])
+				# target_k_feature_queue = torch.tensor([self.queue[idx.item()] for idx in target_k_idx])
+				
+				# loss_consistency_k = ConsistencyLoss(target_k_feature, target_k_feature_queue, mode="l2")
+				# loss_consistency_q = ConsistencyLoss(target_q_feature, target_q_feature_queue, mode="l2")
+				
+				loss_entropy_k = EntropyMinLoss(F.softmax(target_k_pred, dim=1))
+				loss_entropy_q = EntropyMinLoss(F.softmax(target_q_pred, dim=1))
+				loss_entropy = loss_entropy_k + loss_entropy_q
+				
 				if reverse:
 					total_loss = loss_q_cls + loss_k_cls + loss_consistency
+					# total_loss = loss_q_cls + loss_k_cls
+					# total_loss = loss_consistency_k + loss_consistency_q + loss_consistency
 				else:
-					total_loss = 2 * loss_q_cls + 2 * loss_k_cls + loss_consistency
+					total_loss = loss_q_cls + loss_k_cls + 0.1 * loss_consistency + loss_entropy
+					# total_loss = loss_consistency + 0.1 * (loss_entropy_k + loss_entropy_q)
 				
 				total_loss.backward()
 				optimizer.step()
@@ -327,17 +406,22 @@ class Moca_train(object):
 			logger.info("train loss_cls_k {}".format(loss_k_cls))
 			
 			logger.info("train loss_consistency {}".format(loss_consistency))
+			logger.info("train loss_discrepancy {}".format(loss_discrepancy))
+			logger.info("train loss_entropy {}".format(loss_entropy))
 			
 			# logger.info("train loss_entropy_min {}".format(loss_entropy_min))
 			
 			if keep_feature:
 				target_feature = target_feature.data.cpu()
-				target_idx = target_idx.data.cpu()
+				target_idx = target_q_idx.data.cpu()
 				for idx, feature in zip(target_idx, target_feature):
 					idx = idx.item()
 					if idx in self.queue.keys():
-						self.queue.pop(idx)  # delete the last idx and its feature
-					self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
+						# self.queue[idx] = 0.5 * self.queue[idx] + 0.5 * feature.detach().data.cpu()
+						self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
+
+					else:
+						self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
 			
 			cur_correct = self.test(mode="target")
 			if cur_correct > max_correct:
@@ -345,8 +429,12 @@ class Moca_train(object):
 				if save_name:
 					# torch.save(self.model, save_name)
 					logger.info("Model saved to {}".format(save_name))
-		
-		self.source_model = model_weights_update(self.source_model, self.target_model, m=0.9)
+		if stage == "one":
+			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.9, gpu_num=len(args.gpu_ids))
+		elif stage == "two":
+			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.9, gpu_num=len(args.gpu_ids))
+		else:
+			pass
 		# print("self.source_model.metric_feature", self.source_model.metric_fesature.weight[0])
 		# print("self.target_model.metric_feature", self.target_model.metric_feature.weight[0])
 		# logger.info("Finished fine tuning.")
@@ -364,6 +452,7 @@ def get_args():
     parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--arc", type=str, default="resnet50")
     parser.add_argument("--seed", type=int, default=9)
+    parser.add_argument("--dataset", type=str, default="office31")
     parser.add_argument("--pretrain_model_dir", type=str, default="", help="trained model path")
     parser.add_argument('--use-cuda', action='store_true', default=True, help='Use NVIDIA GPU acceleration')
     parser.add_argument("--pruned_model_dir", type=str, default="", help="pruned model path")
@@ -398,10 +487,15 @@ if __name__ == "__main__":
 	pretrain_model_path = os.path.join(args.pretrain_model_dir,
 	                                   args.source + "_" + args.target + '_' + args.arc + "_pretrain.pth")
 	
+	if args.dataset == "office_31":
+		num_classes = 31
+	elif args.dataset == "office_home":
+		num_classes = 65
+	
 	if args.mode == 'train':
 		logger.info("Finetune a model pretrained on ImageNet\n")
 		if args.arc == "resnet50":
-			model = ResNet(num_classes=31)
+			model = ResNet(num_classes=num_classes)
 			model = load_imagenet_pretrain(model, "resnet50")
 		else:
 			raise ValueError("the model arc {} is not provided yet".format(args.arc))
@@ -429,7 +523,7 @@ if __name__ == "__main__":
 		transformer_test = model.test_augmentation()
 
 	source_loader = DataLoader(
-		OfficeDataSet(data_path=os.path.join(args.train_dir, args.source, "images"), transformer=transformer_train, k=1),
+		OfficeDataSet(data_path=os.path.join(args.train_dir, args.source, "images"), transformer=transformer_train, k=2, dataset=args.dataset),
 		batch_size=args.batch_size,
 		num_workers=args.workers,
 		shuffle=True,
@@ -438,7 +532,7 @@ if __name__ == "__main__":
 	)
 
 	target_train_loader = DataLoader(
-		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_train, k=2),
+		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_train, k=2, dataset=args.dataset),
 		batch_size=args.batch_size,
 		num_workers=args.workers,
 		shuffle=True,
@@ -448,7 +542,7 @@ if __name__ == "__main__":
 
 	# load target dataset for testing, its label is used for testing until the whole training process ends.
 	target_test_loader = DataLoader(
-		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_test, k=1),
+		OfficeDataSet(data_path=os.path.join(args.test_dir, args.target, "images"), transformer=transformer_test, k=1, dataset=args.dataset),
 		batch_size=args.batch_size,
 		num_workers=args.workers,
 		shuffle=False,
@@ -457,12 +551,16 @@ if __name__ == "__main__":
 
 	fine_tuner = Moca_train(model, args=args)
 	fine_tuner.test(keep_feature=True)
+
+	# since every data size is different, this training epoch is designed for Office-31
+	# however, a larger dataset is supposed to have a much smaller epoch
 	for _ in trange(10):
-		fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path, keep_feature=True)
-		if _ < 3:
-			fine_tuner.finetune_on_target(epoches=5, save_name=pretrain_model_path, keep_feature=False, reverse=True)
+		if _ <5:
+			fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path, keep_feature=True, stage="one")
+			fine_tuner.finetune_on_target(epoches=5, save_name=pretrain_model_path, keep_feature=True, reverse=True, stage="one")
 		else:
-			fine_tuner.finetune_on_target(epoches=5, save_name=pretrain_model_path, keep_feature=False, reverse=False)
+			fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path, keep_feature=False, stage="two")
+			fine_tuner.finetune_on_target(epoches=10, save_name=pretrain_model_path, keep_feature=True, reverse=False, stage="two")
 
 	logger.info("\n++++Source:{} to target {} finish!++++".format(args.source, args.target))
 	

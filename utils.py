@@ -300,13 +300,38 @@ def ContrastiveLoss(pred, pred_idx, queue):
 
 
 # =========================  consistency loss ==========================
-def ConsistencyLoss(pred_q, pred_k, reverse=False):
-	l2loss = torch.sum((pred_q-pred_k)**2)
+def ConsistencyLoss(pred_q, pred_k, reverse=False, mode='l2'):
+	if mode == "l2":
+		loss = torch.sum((pred_q-pred_k)**2) / 32. # 32 is batch size and I am too lazy to set it as a hyper-parameter
+	elif mode == "l1":
+		loss = torch.sum(pred_q - pred_k)
 	# print("l2loss", l2loss)
 	if reverse:
-		return torch.clamp(5-l2loss, 0, 5)
+		return torch.clamp(5-loss, 0, 5) / 5
 	else:
-		return l2loss
+		return loss
+
+
+# =========================  discrepancy loss ==========================
+def DiscrepancyLoss(pred_q, pred_k, reverse=False, mode="l1"):
+	"""
+	Discrepancy loss calcuate the l1 distance between label prediction
+	:param pred_q: label prediction of q
+	:param pred_k: label prediction of k
+	:param mode: distance metric
+	:return: loss
+	"""
+	if mode == "l1":
+		loss = torch.sum(torch.abs(pred_q - pred_k)) / 32. # 32 is batch size and I am too lazy to set it as a hyper-parameter
+	else:
+		pass  # to do ......
+	
+	if reverse:
+		return torch.clamp(5-loss, 0, 5) / 5
+	else:
+		return loss
+	
+		
 
 
 # ========================= another version of contrastive loss failed ==========================
@@ -343,7 +368,7 @@ def ConsistencyLoss(pred_q, pred_k, reverse=False):
 
 	
 # =========================  fc unpdate  ==============================
-def model_fc_update(source_model, target_model):
+def model_fc_update(source_model, target_model, gpu_num=1, m=0.0):
 	'''
 	:param source_model: source_model
 	:param target_model: target_model
@@ -351,13 +376,18 @@ def model_fc_update(source_model, target_model):
 	'''
 	source_model.cpu()
 	target_model.cpu()
-	target_model.cls_fc.weight.data = source_model.cls_fc.weight.data
-	
+	if gpu_num > 1:
+		target_model.module.cls_fc.weight.data = source_model.module.cls_fc.weight.data
+	else:
+		target_model.cls_fc.weight.data = m * target_model.cls_fc.weight.data + (1-m) * source_model.cls_fc.weight.data
 	return target_model
 
 	
 # =========================  weights unpdate  ==========================
-def model_weights_update(source_model, target_model, m=0.5):
+
+# I have to say the style of the code is so ugly !!!!!!!!!
+
+def model_weights_update(source_model, target_model, m=0.5, gpu_num=1):
 	'''
 	:param source_model: source model
 	:param target_model: target model
@@ -368,72 +398,140 @@ def model_weights_update(source_model, target_model, m=0.5):
 	source_model.cpu()
 	target_model.cpu()
 	
-	# update model.metric_feature.params
-	source_model.metric_feature.weight.data = m * source_model.metric_feature.weight.data + (1-m) * target_model.metric_feature.weight.data
-	source_model.metric_feature.bias.data = m * source_model.metric_feature.bias.data + (1-m) * target_model.metric_feature.bias.data
-	
 	# update model.features.params
 	non_layer_modules = ["conv1", "bn1"]  # eg. model.features._modules["conv1"].weight
 	layer_modules = ["conv1", "bn1", "conv2", "bn2", "conv3", "bn3"]  # eg. model.features._modules[layer_num][num]._modules[layer_module].weight
 	downsample_modules = [0, 1]  # 0 for conv2d, 1 for bn  eg. model.features._modules[layer_num][num]._modules['downsample'][0].weight
 	
-	for name, module in source_model.features._modules.items():
-		if "layer" in name:
-			for index, _ in enumerate(source_model.features._modules[name]):
-				if 'downsample' in source_model.features._modules[name][index]._modules.keys():
-					for downsample_module in downsample_modules:
-						if downsample_module == 0:
-							# update conv weight
-							source_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data = \
-								m * source_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data + (1-m) * \
-								target_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data
-						else:
-							# update bn weight
-							source_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data = \
-								m * source_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data + (1-m) * \
-								target_model.features._modules[name][index]._modules['downsample'][downsample_module].weight.data
-							# update bn bias
-							source_model.features._modules[name][index]._modules['downsample'][downsample_module].bias.data = \
-								m * source_model.features._modules[name][index]._modules['downsample'][downsample_module].bias.data + (1-m) * \
-								target_model.features._modules[name][index]._modules['downsample'][downsample_module].bias.data
-				else:
-					for layer_module in layer_modules:
-						if 'conv' in layer_module:
-							# udpate conv weight
-							source_model.features._modules[name][index]._modules[layer_module].weight.data = \
-								m * source_model.features._modules[name][index]._modules[layer_module].weight.data + (1-m) * \
-								target_model.features._modules[name][index]._modules[layer_module].weight.data
-						elif 'bn' in layer_module:
-							# update bn weight
-							source_model.features._modules[name][index]._modules[layer_module].weight.data = \
-								m * source_model.features._modules[name][index]._modules[layer_module].weight.data + (1-m) * \
-								target_model.features._modules[name][index]._modules[layer_module].weight.data
-
-							# update bn bias
-							source_model.features._modules[name][index]._modules[layer_module].bias.data = \
-								m * source_model.features._modules[name][index]._modules[layer_module].bias.data + (1 - m) * \
-								target_model.features._modules[name][index]._modules[layer_module].bias.data
-						else:
-							raise ValueError("there's no {} in layer_module".format(layer_module))
-		else:
-			for non_layer_module in non_layer_modules:
-				if 'conv' in non_layer_module:
-					# update weight for conv
-					source_model.features._modules[non_layer_module].weight.data =\
-						m * source_model.features._modules[non_layer_module].weight.data + (1-m) *\
-						target_model.features._modules[non_layer_module].weight.data
-				elif 'bn' in non_layer_module:
-					# update weight for bn
-					source_model.features._modules[non_layer_module].weight.data =\
-						m * source_model.features._modules[non_layer_module].weight.data + (1-m) *\
-						target_model.features._modules[non_layer_module].weight.data
-					# update bias for bn
-					source_model.features._modules[non_layer_module].bias.data =\
-						m * source_model.features._modules[non_layer_module].bias.data + (1-m) *\
-						target_model.features._modules[non_layer_module].bias.data
-				else:
-					raise ValueError("there's no {} in non_layer_module".format(non_layer_module))
-				
+	if gpu_num > 1:
+		for name, module in source_model.module.features._modules.items():
+			if "layer" in name:
+				for index, _ in enumerate(source_model.module.features._modules[name]):
+					if 'downsample' in source_model.module.features._modules[name][index]._modules.keys():
+						for downsample_module in downsample_modules:
+							if downsample_module == 0:
+								# update conv weight
+								source_model.module.features._modules[name][index]._modules['downsample'][downsample_module].weight.data = \
+									m * source_model.module.features._modules[name][index]._modules['downsample'][downsample_module].weight.data + (1-m) * \
+									target_model.module.features._modules[name][index]._modules['downsample'][downsample_module].weight.data
+							else:
+								# update bn weight
+								source_model.module.features._modules[name][index]._modules['downsample'][downsample_module].weight.data = \
+									m * source_model.module.features._modules[name][index]._modules['downsample'][downsample_module].weight.data + (1-m) * \
+									target_model.module.features._modules[name][index]._modules['downsample'][downsample_module].weight.data
+								# update bn bias
+								source_model.module.features._modules[name][index]._modules['downsample'][downsample_module].bias.data = \
+									m * source_model.module.features._modules[name][index]._modules['downsample'][downsample_module].bias.data + (1-m) * \
+									target_model.module.features._modules[name][index]._modules['downsample'][downsample_module].bias.data
+					else:
+						for layer_module in layer_modules:
+							if 'conv' in layer_module:
+								# udpate conv weight
+								source_model.module.features._modules[name][index]._modules[layer_module].weight.data = \
+									m * source_model.module.features._modules[name][index]._modules[layer_module].weight.data + (1-m) * \
+									target_model.module.features._modules[name][index]._modules[layer_module].weight.data
+							elif 'bn' in layer_module:
+								# update bn weight
+								source_model.module.features._modules[name][index]._modules[layer_module].weight.data = \
+									m * source_model.module.features._modules[name][index]._modules[layer_module].weight.data + (1-m) * \
+									target_model.module.features._modules[name][index]._modules[layer_module].weight.data
+	
+								# update bn bias
+								source_model.module.features._modules[name][index]._modules[layer_module].bias.data = \
+									m * source_model.module.features._modules[name][index]._modules[layer_module].bias.data + (1 - m) * \
+									target_model.module.features._modules[name][index]._modules[layer_module].bias.data
+							else:
+								raise ValueError("there's no {} in layer_module".format(layer_module))
+			else:
+				for non_layer_module in non_layer_modules:
+					if 'conv' in non_layer_module:
+						# update weight for conv
+						source_model.module.features._modules[non_layer_module].weight.data =\
+							m * source_model.module.features._modules[non_layer_module].weight.data + (1-m) *\
+							target_model.module.features._modules[non_layer_module].weight.data
+					elif 'bn' in non_layer_module:
+						# update weight for bn
+						source_model.module.features._modules[non_layer_module].weight.data =\
+							m * source_model.module.features._modules[non_layer_module].weight.data + (1-m) *\
+							target_model.module.features._modules[non_layer_module].weight.data
+						# update bias for bn
+						source_model.module.features._modules[non_layer_module].bias.data =\
+							m * source_model.module.features._modules[non_layer_module].bias.data + (1-m) *\
+							target_model.module.features._modules[non_layer_module].bias.data
+					else:
+						raise ValueError("there's no {} in non_layer_module".format(non_layer_module))
+	else:
+		for name, module in source_model.features._modules.items():
+			if "layer" in name:
+				for index, _ in enumerate(source_model.features._modules[name]):
+					if 'downsample' in source_model.features._modules[name][index]._modules.keys():
+						for downsample_module in downsample_modules:
+							if downsample_module == 0:
+								# update conv weight
+								source_model.features._modules[name][index]._modules['downsample'][
+									downsample_module].weight.data = \
+									m * source_model.features._modules[name][index]._modules['downsample'][
+										downsample_module].weight.data + (1 - m) * \
+									target_model.features._modules[name][index]._modules['downsample'][
+										downsample_module].weight.data
+							else:
+								# update bn weight
+								source_model.features._modules[name][index]._modules['downsample'][
+									downsample_module].weight.data = \
+									m * source_model.features._modules[name][index]._modules['downsample'][
+										downsample_module].weight.data + (1 - m) * \
+									target_model.features._modules[name][index]._modules['downsample'][
+										downsample_module].weight.data
+								# update bn bias
+								source_model.features._modules[name][index]._modules['downsample'][
+									downsample_module].bias.data = \
+									m * source_model.features._modules[name][index]._modules['downsample'][
+										downsample_module].bias.data + (1 - m) * \
+									target_model.features._modules[name][index]._modules['downsample'][
+										downsample_module].bias.data
+					else:
+						for layer_module in layer_modules:
+							if 'conv' in layer_module:
+								# udpate conv weight
+								source_model.features._modules[name][index]._modules[layer_module].weight.data = \
+									m * source_model.features._modules[name][index]._modules[
+										layer_module].weight.data + (1 - m) * \
+									target_model.features._modules[name][index]._modules[
+										layer_module].weight.data
+							elif 'bn' in layer_module:
+								# update bn weight
+								source_model.features._modules[name][index]._modules[layer_module].weight.data = \
+									m * source_model.features._modules[name][index]._modules[
+										layer_module].weight.data + (1 - m) * \
+									target_model.features._modules[name][index]._modules[
+										layer_module].weight.data
+								
+								# update bn bias
+								source_model.features._modules[name][index]._modules[layer_module].bias.data = \
+									m * source_model.features._modules[name][index]._modules[
+										layer_module].bias.data + (1 - m) * \
+									target_model.features._modules[name][index]._modules[layer_module].bias.data
+							else:
+								raise ValueError("there's no {} in layer_module".format(layer_module))
+			else:
+				for non_layer_module in non_layer_modules:
+					if 'conv' in non_layer_module:
+						# update weight for conv
+						source_model.features._modules[non_layer_module].weight.data = \
+							m * source_model.features._modules[non_layer_module].weight.data + (1 - m) * \
+							target_model.features._modules[non_layer_module].weight.data
+					elif 'bn' in non_layer_module:
+						# update weight for bn
+						source_model.features._modules[non_layer_module].weight.data = \
+							m * source_model.features._modules[non_layer_module].weight.data + (1 - m) * \
+							target_model.features._modules[non_layer_module].weight.data
+						# update bias for bn
+						source_model.features._modules[non_layer_module].bias.data = \
+							m * source_model.features._modules[non_layer_module].bias.data + (1 - m) * \
+							target_model.features._modules[non_layer_module].bias.data
+					else:
+						raise ValueError("there's no {} in non_layer_module".format(non_layer_module))
+	
 	return source_model
 	
 	

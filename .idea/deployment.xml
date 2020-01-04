@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
-  <component name="PublishConfigData" autoUpload="Always" serverName="MOCA_partialDA_2080">
+  <component name="PublishConfigData" autoUpload="Always" serverName="MOCA_18" showAutoUploadSettingsWarning="false">
     <serverData>
+      <paths name="MOCA_18">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/users/leo/Codes/MOCA" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="MOCA_partialDA_2080">
         <serverdata>
           <mappings>

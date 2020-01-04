@@ -10,6 +10,14 @@
           <option name="port" value="6000" />
         </fileTransfer>
       </webServer>
+      <webServer id="af3ad8d1-bf9d-41eb-b770-94677522b497" name="MOCA_18" url="http://hk.gamma-cv.site">
+        <fileTransfer host="hk.gamma-cv.site" port="6018" accessType="SFTP">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+          <option name="port" value="6018" />
+        </fileTransfer>
+      </webServer>
     </option>
   </component>
 </project>
