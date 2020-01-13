@@ -106,54 +106,50 @@ class ResNetFeature(nn.Module):
 
 class ResNet(nn.Module):
 	
-	def __init__(self, num_classes=256, targeted_dropout=None):
+	def __init__(self, num_classes=31, targeted_dropout=None):
 		super(ResNet, self).__init__()
 		self.input_mean = [0.485, 0.456, 0.406]
 		self.input_std = [0.229, 0.224, 0.225]
 		self.features = resnet50(False)
-		self.metric_feature = nn.Linear(2048, 128)
+		
+		self.metric_feature = nn.Sequential(
+			nn.BatchNorm1d(2048),
+			nn.ReLU(),
+			nn.Linear(2048, 128)
+			# nn.Dropout(p=0.4)
+		)
+
+		# self.metric_feature = nn.Linear(2048, 128)
 		self.cls_fc = nn.Linear(128, num_classes)
 	
-		# ========================= normalize fc ==========================
-		# with torch.no_grad():
-		# 	self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
-		# 	self.cls_fc.bias.data.fill_(0.0)
-		# ========================= FBI warning !!! =======================
-		
-	# def forward(self, source, target):
-	# 	source_feature = self.features(source)
-	# 	source_feature = self.metric_feature(source_feature)
-	# 	# ========================= normalize feature ==========================
-	# 	source_feature = F.normalize(source_feature, p=2, dim=1)
-	# 	# ========================= FBI warning !!! ============================
-	# 	source_cls = self.cls_fc(source_feature)
-	#
-	# 	if self.training:
-	# 		target_feature = self.features(target)
-	# 		target_feature = self.metric_feature(target_feature)
-	# 		# ========================= normalize feature ==========================
-	# 		target_feature = F.normalize(target_feature, p=2, dim=1)
-	# 		# ========================= FBI warning !!! ============================
-	# 		target_cls = self.cls_fc(target_feature)
-	# 		return source_cls, target_cls, source_feature, target_feature
-	# 	else:
-	# 		return source_cls, source_feature
-	
+		# self.cls_fc = nn.Parameter(torch.FloatTensor(num_classes, 128))
+		# nn.init.xavier_uniform_(self.cls_fc)
+
 	def forward(self, source, target):
+		# ========================= normalize fc ==========================
+		with torch.no_grad():
+			self.cls_fc.weight.div_(torch.norm(self.cls_fc.weight, dim=1, keepdim=True))
+			self.cls_fc.bias.data.fill_(0.0)
+		# ========================= FBI warning !!! =======================
 		source_feature = self.features(source)
+		source_feature = source_feature.view(source_feature.size(0), -1)
 		source_feature = self.metric_feature(source_feature)
+		# print("source_feature.size", source_feature.shape)
 		# ========================= normalize feature ==========================
 		source_feature = F.normalize(source_feature, p=2, dim=1)
 		# ========================= FBI warning !!! ============================
 		source_cls = self.cls_fc(source_feature)
+		# source_cls = F.linear(source_feature, F.normalize(self.cls_fc))
 
 		if self.training:
 			target_feature = self.features(target)
+			target_feature = target_feature.view(target_feature.size(0), -1)
 			target_feature = self.metric_feature(target_feature)
 			# ========================= normalize feature ==========================
 			target_feature = F.normalize(target_feature, p=2, dim=1)
 			# ========================= FBI warning !!! ============================
 			target_cls = self.cls_fc(target_feature)
+			# target_cls = F.linear(target_feature, F.normalize(self.cls_fc))
 			return source_cls, target_cls, source_feature, target_feature
 		else:
 			return source_cls, source_feature
@@ -203,6 +199,17 @@ def resnet50(pretrained=False, **kwargs):
 	return model
 
 
+def resnet101(pretrained=False, **kwargs):
+	"""Constructs a ResNet-50 model.
+	Args:
+		pretrained (bool): If True, returns a model pre-trained on ImageNet
+	"""
+	model = ResNetFeature(Bottleneck, [3, 4, 23, 3], **kwargs)
+	if pretrained:
+		model.load_state_dict(model_zoo.load_url(model_urls['resnet101']))
+	return model
+
+
 # test the resnet
 
 cuda = True
@@ -215,6 +222,8 @@ def load_imagenet_pretrain(model, base):
 		url = 'https://download.pytorch.org/models/vgg16_bn-6c64b313.pth'
 	elif base == 'resnet50':
 		url = 'https://download.pytorch.org/models/resnet50-19c8e357.pth'
+	elif base == 'resnet101':
+		url = 'https://download.pytorch.org/models/resnet101-5d3b4d8f.pth'
 	else:
 		pass
 	
@@ -255,7 +264,9 @@ def load_imagenet_pretrain(model, base):
 
 if __name__ == "__main__":
 	model = ResNet()
-	model = load_imagenet_pretrain(model, "resnet50")
+	model = load_imagenet_pretrain(model, "resnet101")
 	for layer, module in model.features._modules.items():
-		print(layer)
+		print(module)
+	print(model.metric_feature._modules)
+	print(model.features._modules['layer1'][0]._modules['conv1'])
 # print(model.feature.layer4[0].bn1.weight)

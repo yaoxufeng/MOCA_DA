@@ -266,8 +266,8 @@ def AMLoss(pred, pred_label, s=32, m=-0.1, num_class=256):
 	return adjust_theta
 
 
-# =========================  contrastive loss ==========================
-def ContrastiveLoss(pred, pred_idx, queue):
+# # =========================  contrastive loss ==========================
+def ContrastiveLoss(pred, pred_idx, queue, s=12):
 	'''
 	we implement contrastive loss via the Kaiming He's paper https://arxiv.org/abs/1911.05722
 	:param pred: pred feature of (N, C) where N is batch size, c is the feature vector (perhaps 128 dimension)
@@ -286,25 +286,56 @@ def ContrastiveLoss(pred, pred_idx, queue):
 	# print("neg_k.shape", neg_k.shape)
 
 	l_pos = torch.bmm(pred_q, pred_k)  # get the postive value
-	l_pos = l_pos.view(l_pos.size(0), 1)
+	l_pos = l_pos.view(l_pos.size(0), 1)  # (N, 1)
 	# print("l_pos.shape", l_pos.shape)
-	l_neg = torch.mm(pred_q.view(pred_q.size(0), pred_q.size(2)), neg_k.view(neg_k.size(1), neg_k.size(0)))  # get the negative value
+	l_neg = torch.mm(pred_q.view(pred_q.size(0), pred_q.size(2)), neg_k.view(neg_k.size(1), neg_k.size(0)))  # (N, K) K is the num of negative sample
 	# print("l_neg.shape", l_neg.shape)
 	logits = torch.cat([l_pos, l_neg], dim=1)  # the size should be (N, K+1) and the 0th is your true value
-
 	label = torch.zeros(logits.size(0), dtype=torch.long)  # generate label
-	label[0] = 0.9  # the 0th is the true label
 
-	# return F.cross_entropy(16*logits, label)
-	return logits.cuda(), label.cuda()
+	return F.nll_loss(F.log_softmax(s*logits.cuda(), dim=1), label.cuda())
+
+
+# =========================  contrastive loss failed version==========================
+def ContrastiveLoss_beta(pred_k, pred_q, pred_idx, queue, s=12):
+	'''
+	we implement contrastive loss via the Kaiming He's paper https://arxiv.org/abs/1911.05722
+	:param pred: pred feature of (N, C) where N is batch size, c is the feature vector (perhaps 128 dimension)
+	:param pred_idx: idx of pred_idx
+	:param queue: self.queue which stores all the feature vector of the target data (subsample when data size is large)
+	:return: ContrastiveLoss value
+	'''
+
+	# get postive sample
+	pred_q = pred_q.view(pred_q.size(0), 1, pred_q.size(1)).cpu()  # resize to (N, 1, C)
+	pred_k = pred_k.view(pred_k.size(0), pred_k.size(1), 1).cpu()  # resize to (N, C, 1)
+	l_pos = torch.bmm(pred_q, pred_k)  # get the postive value
+	l_pos = l_pos.view(l_pos.size(0), 1)  # (N, 1)
+	# print("pred_q.shape", pred_q.shape)
+
+	# get negative sample
+	pred_idx = pred_idx.data.cpu()  # trans to cpu
+	pred_idx = [idx.item() for idx in pred_idx]  # get the value from the tensor
+	neg_queue = torch.cat([queue[idx].view(1, queue[idx].size(0)) for idx in queue.keys() if idx not in pred_idx],
+	                  dim=0)  # extract the rest feature vector as negative weight (k, C)
+
+	# resize pred_q to (N, C), neg_queue to (C, K)
+	l_neg = torch.mm(pred_q.view(pred_q.size(0), pred_q.size(2)),
+	                 neg_queue.view(neg_queue.size(1), neg_queue.size(0)))  # (N, K) where K is the num of negative sample
+
+	# print("l_neg.shape", l_neg.shape)
+	logits = torch.cat([l_pos, l_neg], dim=1)  # the size should be (N, K+1) and the 0th is your true value
+	label = torch.zeros(logits.size(0), dtype=torch.long)  # generate label
+
+	return F.nll_loss(F.log_softmax(s * logits.cuda(), dim=1), label.cuda())
 
 
 # =========================  consistency loss ==========================
 def ConsistencyLoss(pred_q, pred_k, reverse=False, mode='l2'):
 	if mode == "l2":
-		loss = torch.sum((pred_q-pred_k)**2) / 32. # 32 is batch size and I am too lazy to set it as a hyper-parameter
+		loss = torch.sum((pred_q-pred_k)**2) / 32  # 32 is batch size and I am too lazy to set it as a hyper-parameter
 	elif mode == "l1":
-		loss = torch.sum(pred_q - pred_k)
+		loss = torch.sum(torch.abs(pred_q - pred_k)) / 32
 	# print("l2loss", l2loss)
 	if reverse:
 		return torch.clamp(5-loss, 0, 5) / 5
@@ -322,7 +353,7 @@ def DiscrepancyLoss(pred_q, pred_k, reverse=False, mode="l1"):
 	:return: loss
 	"""
 	if mode == "l1":
-		loss = torch.sum(torch.abs(pred_q - pred_k)) / 32. # 32 is batch size and I am too lazy to set it as a hyper-parameter
+		loss = torch.sum(torch.abs(pred_q - pred_k)) / 32.  # 32 is batch size and I am too lazy to set it as a hyper-parameter
 	else:
 		pass  # to do ......
 	
@@ -332,40 +363,92 @@ def DiscrepancyLoss(pred_q, pred_k, reverse=False, mode="l1"):
 		return loss
 	
 		
+# =========================  feature discrepancy loss ==========================
+def FeatureLoss(queue_source, queue_target, mode="l2"):
+	'''
+	:param queue_source:
+	:param queue_target:
+	:param mode:
+	:return:
+	'''
+	target_mean = 1. * sum(queue_source.values()) / len(queue_source.values())
+	source_mean = 1. * sum(queue_target.values()) / len(queue_target.values())
+	return torch.sum((target_mean - source_mean)**2)
 
 
-# ========================= another version of contrastive loss failed ==========================
-# def ContrastiveLoss(pred_q, pred_k, pred_idx, queue):
+# =========================  FC layer loss ==========================
+# def FCLoss(source_model, target_model, mode="l2"):
 # 	'''
-# 	we implement contrastive loss via the Kaiming He's paper https://arxiv.org/abs/1911.05722
-# 	:param pred: pred feature of (N, C) where N is batch size, c is the feature vector (perhaps 128 dimension)
-# 	:param pred_idx: idx of pred_idx
-# 	:param queue: self.queue which stores all the feature vector of the target data (subsample when data size is large)
-# 	:return: ContrastiveLoss value
+# 	:param source_model: source model
+# 	:param target_model: target model
+#  	:param mode: distance metric
+# 	:return:
 # 	'''
-# 	pred_idx = pred_idx.data.cpu()  # trans to cpu
-# 	pred_idx = [idx.item() for idx in pred_idx]  # get the value from the tensor
-# 	pred_q = pred_q.view(pred_q.size(0), 1, pred_q.size(1)).cpu()  # resize for bmm (N, 1, C)
-# 	# print("pred_q.shape", pred_q.shape)
-# 	pred_k = pred_k.view(pred_k.size(0), pred_k.size(1), 1).cpu()  # resize for bmm (N, C, 1)
-#
-# 	# print("pred_k.shape", pred_k.shape)
-# 	neg_k = torch.cat([queue[idx].view(1, queue[idx].size(0)) for idx in queue.keys() if idx not in pred_idx], dim=0)  # extract the rest feature vector as negative weight (k, C)
-# 	# print("neg_k.shape", neg_k.shape)
-#
-# 	l_pos = torch.bmm(pred_q, pred_k)  # get the postive value
-# 	l_pos = l_pos.view(l_pos.size(0), 1)
-# 	# print("l_pos.shape", l_pos.shape)
-# 	l_neg = torch.mm(pred_q.view(pred_q.size(0), pred_q.size(2)), neg_k.view(neg_k.size(1), neg_k.size(0)))  # get the negative value
-# 	# print("l_neg.shape", l_neg.shape)
-# 	logits = torch.cat([l_pos, l_neg], dim=1)  # the size should be (N, K+1) and the 0th is your true value
-#
-# 	label = torch.zeros(logits.size(0), dtype=torch.long)  # generate label
-# 	label[0] = 0.9  # the 0th is the true label
-#
-# 	# return F.cross_entropy(16*logits, label)
-# 	return logits.cuda(), label.cuda()
+# 	FCLoss =
 
+
+# =========================  metric constraint loss ==========================
+def MetricLoss(source_model, target_model, mode="l2"):
+	'''
+	:param queue_source:
+	:param queue_target:
+	:param mode:
+	:return:
+	'''
+	metric_loss = torch.sum((source_model.metric_feature.weight.data.cpu() - target_model.metric_feature.weight.data.cpu())**2) / 2048
+	
+	return metric_loss
+
+
+# =========================  label smooth loss ==========================
+def LabelSmoothingLoss(pred, target, smooth=0.1, num_class=31):
+	'''
+	:param pred: pred (N, C) N is batch, C is class num
+	:param target: target label (N)
+	:param smooth: smooth factor, when smooth is set as 0., it's equal to CELoss
+	:param smooth: num of class
+	:return: label smooth loss
+	'''
+	confidence = 1. - smooth
+	label_one_hot = torch.zeros(target.size(0), num_class)
+	label_one_hot.fill_(smooth / (num_class-1))
+	label_one_hot.scatter_(1, target.cpu().unsqueeze(1), confidence)
+	
+	return F.kl_div(F.log_softmax(pred, dim=1), label_one_hot.cuda(), reduction='sum')
+	
+	
+def MixMatch(source_label, source_data, target_label, target_data, alpha=0.75, num_class=31):
+	'''
+	:param source_label: source_label
+	:param source_data: source_data (N, image)
+	:param target_label: pesudo target label
+	:param target_data: target data (N, image)
+	:param alpha: alpha parameter for beta distribution
+	:return:
+	'''
+	
+	# get one_hot label
+	label_source_one_hot = torch.zeros(source_data.size(0), num_class)
+	label_source_one_hot.fill_(0.)
+	label_source_one_hot.scatter_(1, source_label.cpu().unsqueeze(1), 1)
+	
+	label_target_one_hot = torch.zeros(target_data.size(0), num_class)
+	label_target_one_hot.fill_(0.)
+	label_target_one_hot.scatter_(1, target_label.cpu().unsqueeze(1), 1)
+	
+	# get the lam randomly from beta of alpha parameter
+	lam = np.random.beta(alpha, alpha)
+	lam = min(lam, 1 - lam)  # lam is always the larger one
+	
+	# get random index
+	random_index = torch.randperm(source_data.size(0))
+	
+	# mixup
+	mixed_x = lam * source_data + (1 - lam) * target_data[random_index]
+	mixed_y = lam * label_source_one_hot + (1 - lam) * label_target_one_hot[random_index]
+	
+	return mixed_x, mixed_y
+	
 	
 # =========================  fc unpdate  ==============================
 def model_fc_update(source_model, target_model, gpu_num=1, m=0.0):
@@ -379,7 +462,9 @@ def model_fc_update(source_model, target_model, gpu_num=1, m=0.0):
 	if gpu_num > 1:
 		target_model.module.cls_fc.weight.data = source_model.module.cls_fc.weight.data
 	else:
-		target_model.cls_fc.weight.data = m * target_model.cls_fc.weight.data + (1-m) * source_model.cls_fc.weight.data
+		target_model.cls_fc.weight.data = m * source_model.cls_fc.weight.data + (1-m) * target_model.cls_fc.weight.data
+		# target_model.cls_fc.data = m * source_model.cls_fc.data + (1-m) * target_model.cls_fc.data
+
 	return target_model
 
 	
@@ -404,6 +489,14 @@ def model_weights_update(source_model, target_model, m=0.5, gpu_num=1):
 	downsample_modules = [0, 1]  # 0 for conv2d, 1 for bn  eg. model.features._modules[layer_num][num]._modules['downsample'][0].weight
 	
 	if gpu_num > 1:
+		# update metric feature's param
+		# source_model.module.metric_feature.weight.data = m * source_model.module.metric_feature.weight.data + (1-m) * target_model.metric_feature.weight.data
+		# source_model.module.metric_feature._modules['1'].weight.data = m * source_model.module.metric_feature._modules['1'].weight.data \
+		#                                                                + (1-m) * target_model.module.metric_feature._modules._modules['1'].weight.data
+		# source_model.module.metric_feature._modules['2'].weight.data = m * source_model.module.metric_feature._modules['2'].weight.data \
+		#                                                                + (1-m) * target_model.module.metric_feature['2'].weight.data
+		
+		# update feature extractor's param
 		for name, module in source_model.module.features._modules.items():
 			if "layer" in name:
 				for index, _ in enumerate(source_model.module.features._modules[name]):
@@ -461,6 +554,15 @@ def model_weights_update(source_model, target_model, m=0.5, gpu_num=1):
 					else:
 						raise ValueError("there's no {} in non_layer_module".format(non_layer_module))
 	else:
+		# update metric feature's param
+		# source_model.metric_feature.weight.data = m * source_model.metric_feature.weight.data + (1-m) * target_model.metric_feature.weight.data
+		source_model.metric_feature._modules['0'].weight.data = m * source_model.metric_feature._modules['0'].weight.data \
+		                                                        + (1-m) * target_model.metric_feature._modules['0'].weight.data
+		source_model.metric_feature._modules['2'].weight.data = m * source_model.metric_feature._modules['2'].weight.data \
+		                                                        + (1-m) * target_model.metric_feature._modules['2'].weight.data
+
+
+		# update feature extractor's param
 		for name, module in source_model.features._modules.items():
 			if "layer" in name:
 				for index, _ in enumerate(source_model.features._modules[name]):
