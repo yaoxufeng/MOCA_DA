@@ -19,8 +19,8 @@
 ############# office-home partial ###############
 
 #CUDA_VISIBLE_DEVICES=5 python train.py --dataset "office_home" --source="Art.txt" --target="Clipart_partial.txt" --train_dir="/users/leo/Codes/MOCA/data/office_home" --test_dir="/users/leo/Codes/MOCA/data/office_home"  --batch_size 32 --gpu_ids 0
-#CUDA_VISIBLE_DEVICES=4 python train.py --dataset "office_home" --source="Art.txt" --target="Product_partial.txt" --train_dir="/users/leo/Codes/MOCA/data/office_home" --test_dir="/users/leo/Codes/MOCA/data/office_home"  --batch_size 32 --gpu_ids 0
-CUDA_VISIBLE_DEVICES=7 python train.py --dataset "office_home" --source="Art.txt" --target="Real_World_partial.txt" --train_dir="/users/leo/Codes/MOCA/data/office_home" --test_dir="/users/leo/Codes/MOCA/data/office_home"  --batch_size 32 --gpu_ids 0
+CUDA_VISIBLE_DEVICES=4 python train.py --dataset "office_home" --source="Art.txt" --target="Product_partial.txt" --train_dir="/users/leo/Codes/MOCA/data/office_home" --test_dir="/users/leo/Codes/MOCA/data/office_home"  --batch_size 32 --gpu_ids 0
+#CUDA_VISIBLE_DEVICES=6 python train.py --dataset "office_home" --source="Art.txt" --target="Real_World_partial.txt" --train_dir="/users/leo/Codes/MOCA/data/office_home" --test_dir="/users/leo/Codes/MOCA/data/office_home"  --batch_size 32 --gpu_ids 0
 #CUDA_VISIBLE_DEVICES=4 python train.py --dataset "office_home" --source="Clipart.txt" --target="Art_partial.txt" --train_dir="/users/leo/Codes/MOCA/data/office_home" --test_dir="/users/leo/Codes/MOCA/data/office_home"  --batch_size 32 --gpu_ids 0
 #CUDA_VISIBLE_DEVICES=3 python train.py --dataset "office_home" --source="Clipart.txt" --target="Product_partial.txt" --train_dir="/users/leo/Codes/MOCA/data/office_home" --test_dir="/users/leo/Codes/MOCA/data/office_home"  --batch_size 32 --gpu_ids 0
 #CUDA_VISIBLE_DEVICES=2 python train.py --dataset "office_home" --source="Clipart.txt" --target="Real_World_partial.txt" --train_dir="/users/leo/Codes/MOCA/data/office_home" --test_dir="/users/leo/Codes/MOCA/data/office_home"  --batch_size 32 --gpu_ids 0
