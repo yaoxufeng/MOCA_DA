@@ -388,9 +388,9 @@ class Moca_train(object):
 					logger.info("Model saved to {}".format(save_name))
 		
 		if stage == "pre_stage":
-			self.target_model = model_weights_update(self.target_model, self.source_model, m=0., gpu_num=len(args.gpu_ids))
+			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9, gpu_num=len(args.gpu_ids))
 		elif stage == "one":
-			self.target_model = model_weights_update(self.target_model, self.source_model, m=0., gpu_num=len(args.gpu_ids))
+			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9, gpu_num=len(args.gpu_ids))
 		else:
 			pass
 
@@ -545,9 +545,9 @@ class Moca_train(object):
 					logger.info("Model saved to {}".format(save_name))
 		
 		if stage == "pre_stage":
-			self.source_model = model_weights_update(self.source_model, self.target_model, m=0., gpu_num=len(args.gpu_ids))
+			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.5, gpu_num=len(args.gpu_ids))
 		elif stage == "one":
-			self.source_model = model_weights_update(self.source_model, self.target_model, m=0., gpu_num=len(args.gpu_ids))
+			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.5, gpu_num=len(args.gpu_ids))
 		elif stage == "two":
 			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.1, gpu_num=len(args.gpu_ids))
 		else:
