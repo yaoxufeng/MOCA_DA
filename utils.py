@@ -417,6 +417,7 @@ def LabelSmoothingLoss(pred, target, smooth=0.1, num_class=31):
 	return F.kl_div(F.log_softmax(pred, dim=1), label_one_hot.cuda(), reduction='sum')
 	
 	
+# =========================  Mixup loss ==========================
 def MixMatch(source_label, source_data, target_label, target_data, alpha=0.75, num_class=31):
 	'''
 	:param source_label: source_label
@@ -449,6 +450,19 @@ def MixMatch(source_label, source_data, target_label, target_data, alpha=0.75, n
 	
 	return mixed_x, mixed_y
 	
+
+# =========================  sharp entropymin loss  ==============================
+def SELoss(pred, pred_idx, queue, s=10):
+	'''
+	:param pred:
+	:param pred_idx:
+	:param queue:
+	:return:
+	'''
+	weight = torch.cat([queue[idx.item()].view(1, -1) for idx in pred_idx], dim=0)
+	weight = torch.softmax(10 * weight, dim=1)  # sharp the softmax value
+	return -torch.sum(weight * torch.log(s * pred))
+
 	
 # =========================  fc unpdate  ==============================
 def model_fc_update(source_model, target_model, gpu_num=1, m=0.0):
@@ -471,6 +485,7 @@ def model_fc_update(source_model, target_model, gpu_num=1, m=0.0):
 # =========================  weights unpdate  ==========================
 
 # I have to say the style of the code is so ugly !!!!!!!!!
+# the author must be a researcher, who do not care about the coding
 
 def model_weights_update(source_model, target_model, m=0.5, gpu_num=1):
 	'''

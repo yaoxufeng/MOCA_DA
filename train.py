@@ -195,40 +195,40 @@ class Moca_train(object):
 					else:
 						self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
 		
-		if source_feature:
-			for _ in range(64):
-				print("#", end="")
-			print("\ntesting on source dataset!")
+		# if source_feature:
+		# 	for _ in range(64):
+		# 		print("#", end="")
+		# 	print("\ntesting on source dataset!")
 			
-			for _, (data, target, target_idx) in tqdm(enumerate(self.source_loader)):
-				data, target, target_idx = data[0], target[0], target_idx[0]
-				data, target = data.cuda(), target.cuda()
-				if mode == "source":
-					if len(args.gpu_ids) > 1:
-						t_output, target_feature = self.source_model.module(data, data)
-					else:
-						t_output, target_feature = self.source_model(data, data)
-				else:
-					if len(args.gpu_ids) > 1:
-						t_output, target_feature = self.target_model.module(data, data)
-					else:
-						t_output, target_feature = self.target_model(data, data)
-				
-				test_loss += F.nll_loss(F.log_softmax(t_output, dim=1), target,
-				                        reduction='sum').item()  # sum up batch loss
-				pred = t_output.data.max(1)[1]  # get the index of the max log-probability
-				correct += pred.eq(target.data.view_as(pred)).cpu().sum()
-				
-				target_feature = target_feature.data.cpu()
-				target_idx = target_idx.data.cpu()
-				for idx, feature in zip(target_idx, target_feature):
-					idx = idx.item()
-					if idx in self.queue_source.keys():
-						self.queue_source[idx] = 0.5 * feature.detach().data.cpu() + 0.5 * self.queue[
-							idx]  # update new idx and its feature
-					# self.queue.pop(idx)  # delete the last idx and its feature
-					else:
-						self.queue_source[idx] = feature.detach().data.cpu()  # update new idx and its feature
+			# for _, (data, target, target_idx) in tqdm(enumerate(self.source_loader)):
+			# 	data, target, target_idx = data[0], target[0], target_idx[0]
+			# 	data, target = data.cuda(), target.cuda()
+			# 	if mode == "source":
+			# 		if len(args.gpu_ids) > 1:
+			# 			t_output, target_feature = self.source_model.module(data, data)
+			# 		else:
+			# 			t_output, target_feature = self.source_model(data, data)
+			# 	else:
+			# 		if len(args.gpu_ids) > 1:
+			# 			t_output, target_feature = self.target_model.module(data, data)
+			# 		else:
+			# 			t_output, target_feature = self.target_model(data, data)
+			#
+			# 	test_loss += F.nll_loss(F.log_softmax(t_output, dim=1), target,
+			# 	                        reduction='sum').item()  # sum up batch loss
+			# 	pred = t_output.data.max(1)[1]  # get the index of the max log-probability
+			# 	correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+			#
+			# 	target_feature = target_feature.data.cpu()
+			# 	target_idx = target_idx.data.cpu()
+			# 	for idx, feature in zip(target_idx, target_feature):
+			# 		idx = idx.item()
+			# 		if idx in self.queue_source.keys():
+			# 			self.queue_source[idx] = 0.5 * feature.detach().data.cpu() + 0.5 * self.queue[
+			# 				idx]  # update new idx and its feature
+			# 		# self.queue.pop(idx)  # delete the last idx and its feature
+			# 		else:
+			# 			self.queue_source[idx] = feature.detach().data.cpu()  # update new idx and its feature
 		
 		print("queue length", len(self.queue.keys()))
 		
@@ -330,13 +330,13 @@ class Moca_train(object):
 				target_pred = target_pred_k
 				
 				loss_cls = F.nll_loss(F.log_softmax(12 * source_pred, dim=1), label_source)
-				loss_entropy_min = EntropyMinLoss(F.softmax(target_pred, dim=1))
-				loss_feature = FeatureLoss(self.queue_source, self.queue)
+				loss_entropy_min = EntropyMinLoss(F.softmax(12 * target_pred, dim=1))
+				# loss_feature = FeatureLoss(self.queue_source, self.queue)
 
 				if stage == "pre_stage":
-					total_loss = loss_cls + 0.1 * loss_entropy_min
-				elif stage == "one":
 					total_loss = loss_cls
+				elif stage == "one":
+					total_loss = loss_cls + loss_entropy_min
 				elif stage == "two":
 					total_loss = loss_cls
 				else:
@@ -354,15 +354,15 @@ class Moca_train(object):
 						self.queue_target_pesudo[idx] = pesudo_label.detach().data.cpu()  # update new idx and its feature
 
 				# keep feature for source data
-				source_feature = source_feature.data.cpu()
-				source_idx = source_idx.data.cpu()
-				for idx, feature in zip(source_idx, source_feature):
-					idx = idx.item()
-					if idx in self.queue_source.keys():
-						self.queue_source[idx] = 0.5 * self.queue_source[idx] + 0.5 * feature.detach().data.cpu()
-					# self.queue.pop(idx)  # delete the last idx and its feature
-					else:
-						self.queue_source[idx] = feature.detach().data.cpu()  # update new idx and its feature
+				# source_feature = source_feature.data.cpu()
+				# source_idx = source_idx.data.cpu()
+				# for idx, feature in zip(source_idx, source_feature):
+				# 	idx = idx.item()
+				# 	if idx in self.queue_source.keys():
+				# 		self.queue_source[idx] = 0.5 * self.queue_source[idx] + 0.5 * feature.detach().data.cpu()
+				# 	# self.queue.pop(idx)  # delete the last idx and its feature
+				# 	else:
+				# 		self.queue_source[idx] = feature.detach().data.cpu()  # update new idx and its feature
 
 				if keep_feature:
 					target_feature = target_feature.data.cpu()
@@ -378,7 +378,7 @@ class Moca_train(object):
 			logger.info("train epoch {}".format(i + 1))
 			logger.info("train loss_cls {}".format(loss_cls))
 			logger.info("train loss_entropy_min {}".format(loss_entropy_min))
-			logger.info("train loss_feature {}".format(loss_feature))
+			# logger.info("train loss_feature {}".format(loss_feature))
 			
 			cur_correct = self.test(mode="source")
 			if cur_correct > max_correct:
@@ -388,9 +388,9 @@ class Moca_train(object):
 					logger.info("Model saved to {}".format(save_name))
 		
 		if stage == "pre_stage":
-			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9, gpu_num=len(args.gpu_ids))
+			self.target_model = model_weights_update(self.target_model, self.source_model, m=1.0, gpu_num=len(args.gpu_ids))
 		elif stage == "one":
-			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9, gpu_num=len(args.gpu_ids))
+			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.1, gpu_num=len(args.gpu_ids))
 		else:
 			pass
 
@@ -495,19 +495,19 @@ class Moca_train(object):
 				loss_constrastive_q = ContrastiveLoss(target_k_feature, target_k_idx, self.queue, s=16)
 				loss_constrastive = (loss_constrastive_k + loss_constrastive_q) / 2.
 				
-				loss_consistency = ConsistencyLoss(target_q_feature, target_k_feature, reverse=reverse, mode="l2")
+				loss_consistency = ConsistencyLoss(2 * target_q_feature, 2 * target_k_feature, reverse=reverse, mode="l2")
 
 				
-				loss_entropy_k = EntropyMinLoss(F.softmax(target_k_pred, dim=1))
-				loss_entropy_q = EntropyMinLoss(F.softmax(target_q_pred, dim=1))
-				loss_entropy = loss_entropy_k + loss_entropy_q
+				loss_entropy_k = EntropyMinLoss(F.softmax(12 * target_k_pred, dim=1))
+				loss_entropy_q = EntropyMinLoss(F.softmax(12 * target_q_pred, dim=1))
+				loss_entropy = (loss_entropy_k + loss_entropy_q) / 2.
 				
-				loss_feature = FeatureLoss(self.queue_source, self.queue)
+				# loss_feature = FeatureLoss(self.queue_source, self.queue)
 				
 				if stage == "pre_stage":
 					total_loss =  loss_constrastive + loss_consistency
 				elif stage == "one":
-					total_loss = loss_constrastive + loss_discrepancy + loss_entropy
+					total_loss = loss_constrastive + loss_consistency
 				else:
 					total_loss = loss_constrastive + loss_discrepancy + loss_entropy
 				
@@ -521,7 +521,7 @@ class Moca_train(object):
 			logger.info("train loss_consistency {}".format(loss_consistency))
 			logger.info("train loss_discrepancy {}".format(loss_discrepancy))
 			logger.info("train loss_entropy {}".format(loss_entropy))
-			logger.info("train loss_feature {}".format(loss_feature))
+			# logger.info("train loss_feature {}".format(loss_feature))
 			
 			# logger.info("train loss_entropy_min {}".format(loss_entropy_min))
 			
@@ -545,9 +545,9 @@ class Moca_train(object):
 					logger.info("Model saved to {}".format(save_name))
 		
 		if stage == "pre_stage":
-			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.5, gpu_num=len(args.gpu_ids))
+			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.1, gpu_num=len(args.gpu_ids))
 		elif stage == "one":
-			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.5, gpu_num=len(args.gpu_ids))
+			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.1, gpu_num=len(args.gpu_ids))
 		elif stage == "two":
 			self.source_model = model_weights_update(self.source_model, self.target_model, m=0.1, gpu_num=len(args.gpu_ids))
 		else:
@@ -666,7 +666,7 @@ if __name__ == "__main__":
 	for round in trange(20):
 		if round < 3:
 			fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path, keep_feature=True, stage="pre_stage")
-			fine_tuner.finetune_on_target(epoches=5, save_name=pretrain_model_path, keep_feature=True, reverse=True, stage="pre_stage")
+			fine_tuner.finetune_on_target(epoches=5, save_name=pretrain_model_path, keep_feature=True, reverse=False, stage="pre_stage")
 		elif round >=2 and round <5:
 			fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path, keep_feature=True, stage="one")
 			fine_tuner.finetune_on_target(epoches=5, save_name=pretrain_model_path, keep_feature=True, reverse=False, stage="one")
