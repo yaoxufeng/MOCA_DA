@@ -415,8 +415,25 @@ def LabelSmoothingLoss(pred, target, smooth=0.1, num_class=31):
 	label_one_hot.scatter_(1, target.cpu().unsqueeze(1), confidence)
 	
 	return F.kl_div(F.log_softmax(pred, dim=1), label_one_hot.cuda(), reduction='sum')
+
+
+# =========================  label smooth loss ==========================
+def LabelSmoothLoss(pred, target, smooth=0.1, num_class=65):
+	'''
+	:param pred: pred (N, C) N is batch, C is class num
+	:param target: target label (N)
+	:param smooth: smooth factor, when smooth is set as 0., it's equal to CELoss
+	:param smooth: num of class
+	:return: label smooth loss
+	'''
+	confidence = 1. - smooth
+	label_one_hot = torch.zeros(target.size(0), num_class)
+	label_one_hot.scatter_(1, target.cpu().unsqueeze(1), confidence)
 	
+	lsloss = -torch.sum(label_one_hot * torch.log_softmax(pred, dim=1).cpu()) / pred.size(0)
 	
+	return lsloss.cuda()
+
 # =========================  Mixup loss ==========================
 def MixMatch(source_label, source_data, target_label, target_data, alpha=0.75, num_class=31):
 	'''
@@ -452,7 +469,7 @@ def MixMatch(source_label, source_data, target_label, target_data, alpha=0.75, n
 	
 
 # =========================  sharp entropymin loss  ==============================
-def SELoss(pred, pred_idx, queue, s=10):
+def SELoss(pred, pred_idx, queue):
 	'''
 	:param pred:
 	:param pred_idx:
@@ -460,8 +477,9 @@ def SELoss(pred, pred_idx, queue, s=10):
 	:return:
 	'''
 	weight = torch.cat([queue[idx.item()].view(1, -1) for idx in pred_idx], dim=0)
-	weight = torch.softmax(10 * weight, dim=1)  # sharp the softmax value
-	return -torch.sum(weight * torch.log(s * pred))
+	weight = torch.softmax(16 * weight, dim=1)  # sharp the softmax value
+	seloss = -torch.sum(weight * torch.log(pred.cpu())) / pred.size(0)
+	return seloss.cuda()
 
 	
 # =========================  fc unpdate  ==============================
