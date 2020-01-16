@@ -242,8 +242,12 @@ class Moca_train(object):
 	def finetune_on_source(self, epoches=10, save_name=None, keep_feature=False, metric_constraints=False, stage=None):
 		max_correct = 0
 		
+		# if stage == "pre_stage":
+		# 	self.source_model = model_fc_update(self.target_model, self.source_model, gpu_num=len(args.gpu_ids), m=0.1)
 		if stage == "one":
 			self.source_model = model_fc_update(self.target_model, self.source_model, gpu_num=len(args.gpu_ids), m=0.1)
+		else:
+			pass
 		
 		self.source_model.cuda()
 		
@@ -269,8 +273,8 @@ class Moca_train(object):
 				print("#", end="")
 			logger.info("fine tune on source stage {}  Epoch: {}".format(stage, i + 1))
 			
-			if args.arc == "resnet50" or args.arc == "resnet101":
-				LEARNING_RATE = 0.01 / math.pow((1 + 10 * i / epoches), 0.75)  # 10*
+			if stage == "pre_stage":
+				LEARNING_RATE = 0.015 / math.pow((1 + 10 * i / epoches), 0.75)  # 10*
 
 				if len(args.gpu_ids) > 1:
 					optimizer = torch.optim.SGD(self.source_model.module.parameters(), lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
@@ -281,7 +285,33 @@ class Moca_train(object):
 						{'params': self.source_model.cls_fc.parameters(), 'lr': LEARNING_RATE},
 						# {'params': self.source_model.cls_fc, 'lr': LEARNING_RATE },
 					], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+					
+			elif stage == "one":
+				LEARNING_RATE = 0.005 / math.pow((1 + 10 * i / epoches), 0.75)  # 10*
 
+				if len(args.gpu_ids) > 1:
+					optimizer = torch.optim.SGD(self.source_model.module.parameters(), lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+				else:
+					optimizer = torch.optim.SGD([
+						{'params': self.source_model.features.parameters()},
+						{'params': self.source_model.metric_feature.parameters(), 'lr': LEARNING_RATE},
+						{'params': self.source_model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+						# {'params': self.source_model.cls_fc, 'lr': LEARNING_RATE },
+					], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+			
+			else :
+				LEARNING_RATE = 0.001 / math.pow((1 + 10 * i / epoches), 0.75)  # 10*
+
+				if len(args.gpu_ids) > 1:
+					optimizer = torch.optim.SGD(self.source_model.module.parameters(), lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+				else:
+					optimizer = torch.optim.SGD([
+						{'params': self.source_model.features.parameters()},
+						{'params': self.source_model.metric_feature.parameters(), 'lr': LEARNING_RATE},
+						{'params': self.source_model.cls_fc.parameters(), 'lr': LEARNING_RATE},
+						# {'params': self.source_model.cls_fc, 'lr': LEARNING_RATE },
+					], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+			
 			
 			for param_group in optimizer.param_groups:
 				logger.info("Learning rate: {}".format(param_group['lr']))
@@ -290,118 +320,157 @@ class Moca_train(object):
 			
 			# train mode
 			self.source_model.train()
-			
-			# if self.len_source_loader > self.len_target_loader:
-			# 	iter_target = iter(self.target_train_loader)
-			# 	# for b in tqdm(range(1, self.len_source_loader)):
-			# 	target_idx_l
-			# 	for _, (data_source, label_source, source_idx) in tqdm(enumerate(self.source_loader)):
-			# 		# data_source, label_source, source_idx = next(iter_source)
-			# 		data_source_k, label_source_k, source_idx = data_source[0], label_source[0], source_idx[0]
-			# 		data_source_q, _, _ = data_source[1], label_source[1], source_idx[1]
-			# 		try:
-			# 			data_target, _, target_idx = next(iter_target)
-			# 			data_target_k, target_idx = data_target[0], target_idx[0]
-			# 			data_target_q, _ = data_target[1], target_idx[1]
-			# 			# print(target_idx)
-			# 			for idx in target_idx:
-			# 				target_idx_l.append(idx.item())
-			# 			# target_idx_l = list(dict.fromkeys(target_idx_l))
-			# 			print(len(target_idx_l))
-			# 			print(len(set([x for x in target_idx_l if target_idx_l.count(x) > 1])))
-			#
-			# 		except StopIteration:
-			# 			if len(data_target_k < self.args.batch_size):
-			# 				iter_target = iter(self.target_train_loader)
-			# 				data_target, _, target_idx = iter_target.next()
-			# 				data_target_k, target_idx = data_target[0], target_idx[0]
-			# 				data_target_q, _ = data_target[1], target_idx[1]
-			# else:
-			
+
 			# too tired, assume the target_loader larger than source loader
-			iter_source = iter(self.source_loader)
-			for _, (data_target, _, target_idx) in tqdm(enumerate(self.target_train_loader)):
-				data_target_k, target_idx = data_target[0], target_idx[0]
-				data_target_q, _ = data_target[1], target_idx[1]
-				try:
-					data_source, label_source, source_idx = next(iter_source)
-				except StopIteration:
-					iter_source = iter(self.source_loader)
-					data_source, label_source, source_idx = iter_source.next()
-				data_source_k, label_source_k, source_idx = data_source[0], label_source[0], source_idx[0]
-				data_source_q, _ = data_source[1], source_idx[1]
-
-
+			if self.len_target_loader > self.len_source_loader:
+				iter_source = iter(self.source_loader)
+				for _, (data_target, _, target_idx) in tqdm(enumerate(self.target_train_loader)):
+					data_target_k, target_idx = data_target[0], target_idx[0]
+					data_target_q, _ = data_target[1], target_idx[1]
+					try:
+						data_source, label_source, source_idx = next(iter_source)
+					except StopIteration:
+						iter_source = iter(self.source_loader)
+						data_source, label_source, source_idx = iter_source.next()
+					data_source_k, label_source_k, source_idx = data_source[0], label_source[0], source_idx[0]
+					data_source_q, _ = data_source[1], source_idx[1]
+	
+					data_source_k, label_source = data_source_k.cuda(), label_source_k.cuda()
+					data_source_q = data_source_q.cuda()
 					
-				data_source_k, label_source = data_source_k.cuda(), label_source_k.cuda()
-				data_source_q = data_source_q.cuda()
-				
-				data_target_k = data_target_k.cuda()
-				data_target_q = data_target_q.cuda()
-				
-				optimizer.zero_grad()
-
-				if len(args.gpu_ids) > 1:
-					source_pred_k, target_pred_k, source_feature_k, target_feature_k = self.source_model.module(data_source_k, data_target_k)
-					# source_pred_q, target_pred_q, source_feature_q, target_feature_q = self.source_model.module(data_source_q, data_target_q)
-				else:
-					source_pred_k, target_pred_k, source_feature_k, target_feature_k = self.source_model(data_source_k, data_target_k)
-					# source_pred_q, target_pred_q, source_feature_q, target_feature_q = self.source_model(data_source_q, data_target_q)
-				
-				source_feature = source_feature_k
-				source_pred = source_pred_k
-				target_feature = target_feature_k
-				target_pred = target_pred_k
-				
-				# store pesudo label of target
-				for idx, pesudo_label in zip(target_idx, target_pred_k):
-					idx = idx.item()
-					if idx in self.queue_target_pesudo.keys():
-						self.queue_target_pesudo[idx] = 0.5 * self.queue_target_pesudo[
-							idx] + 0.5 * pesudo_label.detach().data.cpu()
+					data_target_k = data_target_k.cuda()
+					data_target_q = data_target_q.cuda()
+					
+					optimizer.zero_grad()
+	
+					if len(args.gpu_ids) > 1:
+						source_pred_k, target_pred_k, source_feature_k, target_feature_k = self.source_model.module(data_source_k, data_target_k)
+						# source_pred_q, target_pred_q, source_feature_q, target_feature_q = self.source_model.module(data_source_q, data_target_q)
 					else:
-						self.queue_target_pesudo[
-							idx] = pesudo_label.detach().data.cpu()  # update new idx and its feature
-				
-				loss_cls = F.nll_loss(F.log_softmax(12 * source_pred, dim=1), label_source)
-				loss_entropy_min = EntropyMinLoss(F.softmax(12 * target_pred, dim=1))
-				# loss_feature = FeatureLoss(self.queue_source, self.queue)
-				loss_entropy_sharp = SELoss(F.softmax(16 * target_pred, dim=1), target_idx, self.queue_target_pesudo)
-				loss_ls = LabelSmoothLoss(source_pred, label_source)
-
-				if stage == "pre_stage":
-					total_loss = loss_cls
-				elif stage == "one":
-					total_loss = loss_ls + loss_entropy_sharp
-				elif stage == "two":
-					total_loss = loss_cls
-				else:
-					pass
-				
-				total_loss.backward()
-				optimizer.step()
-			
-				# keep feature for source data
-				# source_feature = source_feature.data.cpu()
-				# source_idx = source_idx.data.cpu()
-				# for idx, feature in zip(source_idx, source_feature):
-				# 	idx = idx.item()
-				# 	if idx in self.queue_source.keys():
-				# 		self.queue_source[idx] = 0.5 * self.queue_source[idx] + 0.5 * feature.detach().data.cpu()
-				# 	# self.queue.pop(idx)  # delete the last idx and its feature
-				# 	else:
-				# 		self.queue_source[idx] = feature.detach().data.cpu()  # update new idx and its feature
-
-				if keep_feature:
-					target_feature = target_feature.data.cpu()
-					target_idx = target_idx.data.cpu()
-					for idx, feature in zip(target_idx, target_feature):
+						source_pred_k, target_pred_k, source_feature_k, target_feature_k = self.source_model(data_source_k, data_target_k)
+						# source_pred_q, target_pred_q, source_feature_q, target_feature_q = self.source_model(data_source_q, data_target_q)
+					
+					source_feature = source_feature_k
+					source_pred = source_pred_k
+					target_feature = target_feature_k
+					target_pred = target_pred_k
+					
+					# store pesudo label of target
+					for idx, pesudo_label in zip(target_idx, target_pred_k):
 						idx = idx.item()
-						if idx in self.queue.keys():
-							self.queue[idx] = 0.5 * self.queue[idx] + 0.5 * feature.detach().data.cpu()
-							# self.queue.pop(idx)  # delete the last idx and its feature
+						if idx in self.queue_target_pesudo.keys():
+							self.queue_target_pesudo[idx] = 0.5 * self.queue_target_pesudo[
+								idx] + 0.5 * pesudo_label.detach().data.cpu()
 						else:
-							self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
+							self.queue_target_pesudo[
+								idx] = pesudo_label.detach().data.cpu()  # update new idx and its feature
+					
+					loss_cls = F.nll_loss(F.log_softmax(12 * source_pred, dim=1), label_source)
+					loss_entropy_min = EntropyMinLoss(F.softmax(12 * target_pred, dim=1))
+					# loss_feature = FeatureLoss(self.queue_source, self.queue)
+					loss_entropy_sharp = SELoss(F.softmax(16 * target_pred, dim=1), target_idx, self.queue_target_pesudo)
+					loss_ls = LabelSmoothLoss(source_pred, label_source, num_class=args.num_classes)
+	
+					if stage == "pre_stage":
+						total_loss = loss_cls
+					elif stage == "one":
+						total_loss = 0.1 * loss_cls + loss_entropy_sharp
+					elif stage == "two":
+						total_loss = 0.1 * loss_cls + loss_entropy_sharp
+					else:
+						pass
+					
+					total_loss.backward()
+					optimizer.step()
+					
+					if keep_feature:
+						target_feature = target_feature.data.cpu()
+						target_idx = target_idx.data.cpu()
+						for idx, feature in zip(target_idx, target_feature):
+							idx = idx.item()
+							if idx in self.queue.keys():
+								self.queue[idx] = 0.5 * self.queue[idx] + 0.5 * feature.detach().data.cpu()
+								# self.queue.pop(idx)  # delete the last idx and its feature
+							else:
+								self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
+					
+			else:
+				iter_target = iter(self.target_train_loader)
+				for _, (data_source, label_source, source_idx) in tqdm(enumerate(self.source_loader)):
+					data_source_k, label_source_k, source_idx = data_source[0], label_source[0], source_idx[0]
+					data_source_q = data_source[1]
+					try:
+						data_target, _, target_idx = next(iter_target)
+						
+					except StopIteration:
+						iter_target = iter(self.target_train_loader)
+						data_target, _, target_idx = iter_target.next()
+						
+					# data_source_k, label_source_k, source_idx = data_source[0], label_source[0], source_idx[0]
+					# data_source_q, _ = data_source[1], source_idx[1]
+					
+					data_source_k, label_source = data_source_k.cuda(), label_source_k.cuda()
+					data_source_q = data_source_q.cuda()
+					
+					data_target_k, data_target_q, target_idx = data_target[0], data_target[1], target_idx[1]
+					data_target_k = data_target_k.cuda()
+					data_target_q = data_target_q.cuda()
+					
+					optimizer.zero_grad()
+					
+					if len(args.gpu_ids) > 1:
+						source_pred_k, target_pred_k, source_feature_k, target_feature_k = self.source_model.module(
+							data_source_k, data_target_k)
+					# source_pred_q, target_pred_q, source_feature_q, target_feature_q = self.source_model.module(data_source_q, data_target_q)
+					else:
+						source_pred_k, target_pred_k, source_feature_k, target_feature_k = self.source_model(
+							data_source_k, data_target_k)
+					# source_pred_q, target_pred_q, source_feature_q, target_feature_q = self.source_model(data_source_q, data_target_q)
+					
+					source_feature = source_feature_k
+					source_pred = source_pred_k
+					target_feature = target_feature_k
+					target_pred = target_pred_k
+					
+					# store pesudo label of target
+					for idx, pesudo_label in zip(target_idx, target_pred_k):
+						idx = idx.item()
+						if idx in self.queue_target_pesudo.keys():
+							self.queue_target_pesudo[idx] = 0.5 * self.queue_target_pesudo[
+								idx] + 0.5 * pesudo_label.detach().data.cpu()
+						else:
+							self.queue_target_pesudo[
+								idx] = pesudo_label.detach().data.cpu()  # update new idx and its feature
+					
+					loss_cls = F.nll_loss(F.log_softmax(12 * source_pred, dim=1), label_source)
+					loss_entropy_min = EntropyMinLoss(F.softmax(12 * target_pred, dim=1))
+					# loss_feature = FeatureLoss(self.queue_source, self.queue)
+					loss_entropy_sharp = SELoss(F.softmax(16 * target_pred, dim=1), target_idx,
+					                            self.queue_target_pesudo)
+					loss_ls = LabelSmoothLoss(source_pred, label_source, num_class=args.num_classes)
+					
+					if stage == "pre_stage":
+						total_loss = loss_cls
+					elif stage == "one":
+						total_loss = 0.1 * loss_cls + loss_entropy_sharp
+					elif stage == "two":
+						total_loss = 0.1 * loss_cls + loss_entropy_sharp
+					else:
+						pass
+					
+					total_loss.backward()
+					optimizer.step()
+
+					if keep_feature:
+						target_feature = target_feature.data.cpu()
+						target_idx = target_idx.data.cpu()
+						for idx, feature in zip(target_idx, target_feature):
+							idx = idx.item()
+							if idx in self.queue.keys():
+								self.queue[idx] = 0.5 * self.queue[idx] + 0.5 * feature.detach().data.cpu()
+								# self.queue.pop(idx)  # delete the last idx and its feature
+							else:
+								self.queue[idx] = feature.detach().data.cpu()  # update new idx and its feature
 
 			logger.info("train epoch {}".format(i + 1))
 			logger.info("train loss_cls {}".format(loss_cls))
@@ -422,11 +491,10 @@ class Moca_train(object):
 		if stage == "pre_stage":
 			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9, gpu_num=len(args.gpu_ids))
 		elif stage == "one":
-			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.5, gpu_num=len(args.gpu_ids))
+			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9, gpu_num=len(args.gpu_ids))
 		else:
-			pass
-
-
+			self.target_model = model_weights_update(self.target_model, self.source_model, m=0.9, gpu_num=len(args.gpu_ids))
+	
 	def finetune_on_target(self, epoches=5, save_name=None, keep_feature=True, reverse=False, stage=None):
 		max_correct = 0
 		
@@ -483,7 +551,7 @@ class Moca_train(object):
 				print("#", end="")
 			logger.info("fine tune on target stage {} Epoch: {}".format(stage, i + 1))
 			
-			if args.arc == "resnet50" or args.arc == "resnet101" :
+			if stage == "pre_stage":
 				LEARNING_RATE = 0.015 / math.pow((1 + 10 * i / epoches), 0.75)  # 10*
 				if len(args.gpu_ids) > 1:
 					optimizer = torch.optim.SGD(self.source_model.module.parameters(), lr=LEARNING_RATE / 10, momentum=0.9,
@@ -495,6 +563,35 @@ class Moca_train(object):
 						{'params': self.target_model.cls_fc.parameters()},
 						# {'params': self.target_model.cls_fc, 'lr': LEARNING_RATE / 10},
 						
+					], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+			
+			elif stage == "one":
+				LEARNING_RATE = 0.005 / math.pow((1 + 10 * i / epoches), 0.75)  # 10*
+				if len(args.gpu_ids) > 1:
+					optimizer = torch.optim.SGD(self.source_model.module.parameters(), lr=LEARNING_RATE / 10,
+					                            momentum=0.9,
+					                            weight_decay=5e-4)
+				else:
+					optimizer = torch.optim.SGD([
+						{'params': self.target_model.features.parameters()},
+						{'params': self.target_model.metric_feature.parameters()},
+						{'params': self.target_model.cls_fc.parameters()},
+						# {'params': self.target_model.cls_fc, 'lr': LEARNING_RATE / 10},
+					
+					], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
+			else:
+				LEARNING_RATE = 0.001 / math.pow((1 + 10 * i / epoches), 0.75)  # 10*
+				if len(args.gpu_ids) > 1:
+					optimizer = torch.optim.SGD(self.source_model.module.parameters(), lr=LEARNING_RATE / 10,
+					                            momentum=0.9,
+					                            weight_decay=5e-4)
+				else:
+					optimizer = torch.optim.SGD([
+						{'params': self.target_model.features.parameters()},
+						{'params': self.target_model.metric_feature.parameters()},
+						{'params': self.target_model.cls_fc.parameters()},
+						# {'params': self.target_model.cls_fc, 'lr': LEARNING_RATE / 10},
+					
 					], lr=LEARNING_RATE / 10, momentum=0.9, weight_decay=5e-4)
 					
 			for param_group in optimizer.param_groups:
@@ -527,7 +624,13 @@ class Moca_train(object):
 				loss_constrastive_q = ContrastiveLoss(target_k_feature, target_k_idx, self.queue, s=16)
 				loss_constrastive = (loss_constrastive_k + loss_constrastive_q) / 2.
 				
-				loss_consistency = ConsistencyLoss(2 * target_q_feature, 2 * target_k_feature, reverse=reverse, mode="l2")
+				if stage == "pre_stage":
+					loss_consistency = ConsistencyLoss(target_q_feature, target_k_feature, reverse=reverse, mode="l2")
+				elif stage == "one":
+					loss_consistency = ConsistencyLoss(2 * target_q_feature, 2 * target_k_feature, reverse=reverse, mode="l2")
+				else:
+					loss_consistency = ConsistencyLoss(4 * target_q_feature, 4 * target_k_feature, reverse=reverse, mode="l2")
+
 				loss_entropy_sharp = SELoss(F.softmax(12 * target_q_pred, dim=1), target_q_idx, self.queue_target_pesudo)
 				
 				loss_entropy_k = EntropyMinLoss(F.softmax(12 * target_k_pred, dim=1))
@@ -537,11 +640,17 @@ class Moca_train(object):
 				# loss_feature = FeatureLoss(self.queue_source, self.queue)
 				
 				if stage == "pre_stage":
-					total_loss =  loss_constrastive + loss_consistency
+					total_loss =  loss_constrastive + loss_entropy
+					# partial office_31
+					# total_loss =  loss_constrastive + 0.1 * loss_consistency + loss_entropy  # d -> a because dataset a is larger
+					# total_loss =  loss_constrastive + 0.1 * loss_consistency + loss_entropy  # w -> a because dataset a is larger
+					# total_loss =  loss_constrastive + loss_consistency + 0.1 * loss_entropy  # a -> d
+					# total_loss =  loss_constrastive + loss_consistency + 0.1 * loss_entropy  # a -> w
+					
 				elif stage == "one":
 					total_loss = loss_constrastive + loss_consistency + loss_entropy_sharp
 				else:
-					total_loss = loss_constrastive + loss_discrepancy + loss_entropy
+					total_loss = loss_constrastive + loss_consistency + loss_entropy_sharp
 				
 				total_loss.backward()
 				optimizer.step()
@@ -604,7 +713,7 @@ def get_args():
     parser.add_argument('--use-cuda', action='store_true', default=True, help='Use NVIDIA GPU acceleration')
     parser.add_argument("--pruned_model_dir", type=str, default="", help="pruned model path")
     parser.add_argument("--gpu_ids", nargs='+', type=int, default=None)
-    parser.add_argument("--workers", type=int, default=12)
+    parser.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
     args.use_cuda = args.use_cuda and torch.cuda.is_available()
 
@@ -635,18 +744,18 @@ if __name__ == "__main__":
 	                                   args.source + "_" + args.target + '_' + args.arc + "_pretrain.pth")
 	
 	if args.dataset == "office_31":
-		num_classes = 31
+		args.num_classes = 31
 	elif args.dataset == "office_home":
-		num_classes = 65
+		args.num_classes = 65
 	
 	if args.mode == 'train':
 		logger.info("Finetune a model pretrained on ImageNet\n")
 		if args.arc == "resnet50":
-			model = ResNet(num_classes=num_classes)
+			model = ResNet(num_classes=args.num_classes)
 			source_model = load_imagenet_pretrain(model, "resnet50")
 			target_model = copy.deepcopy(source_model)
 		elif args.arc == "resnet101":
-			model = ResNet(num_classes=num_classes)
+			model = ResNet(num_classes=args.num_classes)
 			source_model = load_imagenet_pretrain(model, "resnet101")
 			target_model = copy.deepcopy(source_model)
 		else:
@@ -697,9 +806,10 @@ if __name__ == "__main__":
 	# however, a larger dataset is supposed to have a much smaller epoch
 	for round in trange(20):
 		if round < 3:
-			fine_tuner.finetune_on_source(epoches=5, save_name=pretrain_model_path, keep_feature=True, stage="pre_stage")
-			fine_tuner.finetune_on_target(epoches=5, save_name=pretrain_model_path, keep_feature=True, reverse=False, stage="pre_stage")
-		elif round >=5 and round <6:
+			fine_tuner.finetune_on_source(epoches=3, save_name=pretrain_model_path, keep_feature=True, stage="pre_stage")
+			# partial office_31
+			fine_tuner.finetune_on_target(epoches=3, save_name=pretrain_model_path, keep_feature=True, reverse=False, stage="pre_stage")
+		elif round >= 3 and round < 6:
 			fine_tuner.finetune_on_source(epoches=3, save_name=pretrain_model_path, keep_feature=True, stage="one")
 			fine_tuner.finetune_on_target(epoches=3, save_name=pretrain_model_path, keep_feature=True, reverse=False, stage="one")
 		else:
