@@ -115,7 +115,7 @@ class ResNet(nn.Module):
 		self.metric_feature = nn.Sequential(
 			nn.BatchNorm1d(2048),
 			nn.ReLU(),
-			nn.Linear(2048, 128),
+			nn.Linear(2048, 256),
 			nn.Dropout(p=0.2)
 		)
 		# self.metric_feature = nn.Sequential(
@@ -125,7 +125,7 @@ class ResNet(nn.Module):
 		# 	nn.Dropout(p=0.2)
 		# )
 
-		self.cls_fc = nn.Linear(128, num_classes)
+		self.cls_fc = nn.Linear(256, num_classes)
 	
 		# self.cls_fc = nn.Parameter(torch.FloatTensor(num_classes, 256))
 		# nn.init.xavier_uniform_(self.cls_fc)

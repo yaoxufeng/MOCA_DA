@@ -481,7 +481,24 @@ def SELoss(pred, pred_idx, queue):
 	seloss = -torch.sum(weight * torch.log(pred.cpu())) / pred.size(0)
 	return seloss.cuda()
 
-	
+
+# =========================  sharp source soft loss  ==============================
+def SSLoss(pred, pred_idx, pred_label, queue, num_class=65):
+	'''
+	:param pred:
+	:param pred_idx:
+	:param label:
+	:param queue:
+	:return:
+	'''
+	weight = torch.cat([queue[idx.item()].view(1, -1) for idx in pred_idx], dim=0)
+	weight = torch.softmax(16 * weight, dim=1)  # sharp the softmax value
+	label_one_hot = torch.zeros(pred_label.size(0), num_class)
+	label_one_hot.scatter_(1, pred_label.cpu().unsqueeze(1), 1.)
+	ssloss = -torch.sum(weight * label_one_hot * torch.log(pred.cpu())) / pred.size(0)
+	return ssloss.cuda()
+
+
 # =========================  fc unpdate  ==============================
 def model_fc_update(source_model, target_model, gpu_num=1, m=0.0):
 	'''
